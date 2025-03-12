@@ -168,9 +168,14 @@ async function checkRoute(origin, destination, date) {
   }
 }
 
-function cacheKey(origin, date) {
-  const [year, month, day] = date.split("-");
-  return `${origin}-${year}-${month}-${day}`;
+function makeCacheKey(origin, date) {
+  return `${origin}-${date}`;
+}
+
+function getCachedResultsKeys() {
+  return Object.keys(localStorage).filter((key) =>
+    key.match(/^[A-Z]+-\d{4}-\d{2}-\d{2}$/)
+  );
 }
 
 function setCachedResults(key, results) {
@@ -181,21 +186,39 @@ function setCachedResults(key, results) {
   localStorage.setItem(key, JSON.stringify(cacheData));
 }
 
-function getCachedResults(key) {
+function getCachedData(key) {
   const cachedData = localStorage.getItem(key);
   if (cachedData) {
     const { results, timestamp } = JSON.parse(cachedData);
     const eightHoursInMs = 8 * 60 * 60 * 1000;
     if (Date.now() - timestamp < eightHoursInMs) {
-      return results;
+      return cachedData;
     } else {
-      clearCache(key);
+      removeCachedResults(key);
     }
   }
   return null;
 }
 
-function clearCache(key) {
+function getCachedResults(key) {
+  const cachedData = getCachedData(key);
+  if (cachedData) {
+    const { results, timestamp } = JSON.parse(cachedData);
+    return results;
+  }
+  return null;
+}
+
+function getCachedTimestamp(key) {
+  const cachedData = getCachedData(key);
+  if (cachedData) {
+    const { results, timestamp } = JSON.parse(cachedData);
+    return timestamp;
+  }
+  return null;
+}
+
+function removeCachedResults(key) {
   localStorage.removeItem(key);
 }
 
@@ -223,7 +246,7 @@ async function checkAllRoutes() {
   document.querySelector("#rate-limited-message").style.display = "none";
   routeListElement.innerHTML = "";
 
-  const cacheKey = `${origin}-${selectedDate}`;
+  const cacheKey = makeCacheKey(origin, selectedDate);
   const cachedResults = getCachedResults(cacheKey);
 
   if (cachedResults) {
@@ -417,8 +440,8 @@ function displayResults(flightsByDate, append = false) {
           const origin = document
             .getElementById("airport-input")
             .value.toUpperCase();
-          const cacheKey = `${origin}-${date}`;
-          clearCache(cacheKey);
+          const cacheKey = makeCacheKey(origin, date);
+          removeCachedResults(cacheKey);
         });
 
         dateHeader.appendChild(clearCacheButton);
@@ -740,9 +763,7 @@ function displayCacheButton() {
 }
 
 function showCachedResults() {
-  const cacheKeys = Object.keys(localStorage).filter((key) =>
-    key.match(/^[A-Z]+-\d{4}-\d{2}-\d{2}$/)
-  );
+  const cacheKeys = getCachedResultsKeys();
 
   const resultsDiv = document.querySelector(".route-list");
   resultsDiv.innerHTML = "";
@@ -814,12 +835,10 @@ function showCachedResults() {
 }
 
 function clearAllCachedResults() {
-  const cacheKeys = Object.keys(localStorage).filter((key) =>
-    key.match(/^[A-Z]+-\d{4}-\d{2}-\d{2}$/)
-  );
+  const cacheKeys = getCachedResultsKeys();
 
   cacheKeys.forEach((key) => {
-    localStorage.removeItem(key);
+    removeCachedResults(key);
   });
 
   const resultsDiv = document.querySelector(".route-list");
@@ -827,8 +846,9 @@ function clearAllCachedResults() {
 }
 
 function displayCachedResult(key) {
-  const cachedData = localStorage.getItem(key);
-  if (cachedData) {
+  const cachedResults = getCachedResults(key);
+  const timestamp = getCachedTimestamp(key);
+  if (cachedResults) {
     // Stop and remove audio player when displaying cached results
     const audioPlayer = document.getElementById("background-music");
     if (audioPlayer) {
@@ -836,7 +856,6 @@ function displayCachedResult(key) {
       audioPlayer.remove();
     }
 
-    const { results, timestamp } = JSON.parse(cachedData);
     const [origin, year, month, day] = key.split("-");
     const date = `${year}-${month}-${day}`;
 
@@ -877,7 +896,7 @@ function displayCachedResult(key) {
     refreshButton.style.marginTop = "10px";
     refreshButton.classList.add("button", "is-small", "is-info", "is-light");
     refreshButton.addEventListener("click", () => {
-      clearCache(key);
+      removeCachedResults(key);
       checkAllRoutes();
     });
 
@@ -885,14 +904,13 @@ function displayCachedResult(key) {
     cacheInfoDiv.appendChild(cacheNotification);
     resultsDiv.appendChild(cacheInfoDiv);
 
-    displayResults({ [date]: results });
+    displayResults({ [date]: cachedResults });
 
-    results.forEach(async (flight) => {
+    cachedResults.forEach(async (flight) => {
       const returnCacheKey = `${key}-return-${flight.route}`;
-      const cachedReturnData = localStorage.getItem(returnCacheKey);
-      if (cachedReturnData) {
-        const { results: returnFlights } = JSON.parse(cachedReturnData);
-        displayReturnFlights(flight, returnFlights);
+      const cachedReturnResults = getCachedResults(returnCacheKey);
+      if (cachedReturnResults) {
+        displayReturnFlights(flight, cachedReturnResults);
       }
     });
   } else {
@@ -901,19 +919,10 @@ function displayCachedResult(key) {
 }
 
 function checkCacheValidity() {
-  const cacheKeys = Object.keys(localStorage).filter((key) =>
-    key.match(/^[A-Z]+-\d{4}-\d{2}-\d{2}$/)
-  );
-  const eightHoursInMs = 8 * 60 * 60 * 1000;
+  const cacheKeys = getCachedResultsKeys();
 
   cacheKeys.forEach((key) => {
-    const cachedData = localStorage.getItem(key);
-    if (cachedData) {
-      const { timestamp } = JSON.parse(cachedData);
-      if (Date.now() - timestamp >= eightHoursInMs) {
-        clearCache(key);
-      }
-    }
+    getCachedResults(key);
   });
 }
 
