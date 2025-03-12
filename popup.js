@@ -248,14 +248,15 @@ async function checkAllRoutes() {
 
   const cacheKey = makeCacheKey(origin, selectedDate);
   const cachedResults = getCachedResults(cacheKey);
+  const timestamp = getCachedTimestamp(cacheKey);
 
   if (cachedResults) {
-    console.log("Using cached results");
+    console.log("Using cached itinerary results for origin=", origin, ", date=", selectedDate);
     displayResults({ [selectedDate]: cachedResults });
     const routeListElement = document.querySelector(".route-list");
     const cacheNotification = document.createElement("div");
     cacheNotification.textContent =
-      'Using cached results. Click the "Refresh Cache" button to fetch new data.';
+      `Using cached results. Click the "Refresh Cache" button to fetch new data. Cache date: ${new Date(timestamp).toLocaleString()}`;
     cacheNotification.style.backgroundColor = "#e6f7ff";
     cacheNotification.style.border = "1px solid #91d5ff";
     cacheNotification.style.borderRadius = "4px";
@@ -859,52 +860,21 @@ function displayCachedResult(key) {
     const [origin, year, month, day] = key.split("-");
     const date = `${year}-${month}-${day}`;
 
-    const resultsDiv = document.querySelector(".route-list");
-    resultsDiv.innerHTML = "";
+    displayResults({ [date]: cachedResults });
+    const routeListElement = document.querySelector(".route-list");
 
     const cacheNotification = document.createElement("div");
     cacheNotification.textContent =
-      'Using cached results. Click the "Refresh Cache" button to fetch new data.';
+      `Using cached results. Click the "Refresh Cache" button to fetch new data. Cache date: ${new Date(timestamp).toLocaleString()}`;
     cacheNotification.style.backgroundColor = "#e6f7ff";
     cacheNotification.style.border = "1px solid #91d5ff";
     cacheNotification.style.borderRadius = "4px";
     cacheNotification.style.padding = "10px";
     cacheNotification.style.marginBottom = "15px";
-
-    const cacheInfoDiv = document.createElement("div");
-    cacheInfoDiv.style.backgroundColor = "#e6f7ff";
-    cacheInfoDiv.style.border = "1px solid #91d5ff";
-    cacheInfoDiv.style.borderRadius = "4px";
-    cacheInfoDiv.style.padding = "10px";
-    cacheInfoDiv.style.marginBottom = "15px";
-
-    const dateObj = new Date(date);
-    const formattedDate = dateObj.toLocaleDateString("en-US", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
-
-    cacheInfoDiv.innerHTML = `<p>Showing cached results for ${origin} on ${formattedDate}</p>
-                              <p>Cache date: ${new Date(
-                                timestamp
-                              ).toLocaleString()}</p>`;
-
-    const refreshButton = document.createElement("button");
-    refreshButton.textContent = "♻️ Refresh Cache";
-    refreshButton.style.marginTop = "10px";
-    refreshButton.classList.add("button", "is-small", "is-info", "is-light");
-    refreshButton.addEventListener("click", () => {
-      removeCachedResults(key);
-      checkAllRoutes();
-    });
-
-    cacheInfoDiv.appendChild(refreshButton);
-    cacheInfoDiv.appendChild(cacheNotification);
-    resultsDiv.appendChild(cacheInfoDiv);
-
-    displayResults({ [date]: cachedResults });
+    routeListElement.insertBefore(
+      cacheNotification,
+      routeListElement.firstChild
+    );
 
     cachedResults.forEach(async (flight) => {
       const returnCacheKey = `${key}-return-${flight.route}`;
