@@ -222,6 +222,47 @@ function removeCachedResults(key) {
   localStorage.removeItem(key);
 }
 
+async function checkFlights(origin, destination, date) {
+  console.log("checkFlights called for origin=", origin, ", destination=", destination, ", date=", date);
+
+  let flightsOnThisDate = {};
+  flightsOnThisDate[date] = [];
+
+  try {
+    const flights = await checkRoute(origin, destination, date);
+    if (flights && flights.length > 0) {
+      flights.forEach((flight) => {
+        const flightInfo = {
+          route: `${origin} (${flight.departureStationText}) to ${destination} (${flight.arrivalStationText}) - ${flight.flightCode}`,
+          date: flight.departureDate,
+          departure: `${flight.departure} (${flight.departureOffsetText})`,
+          arrival: `${flight.arrival} (${flight.arrivalOffsetText})`,
+          duration: flight.duration,
+        };
+
+        flightsOnThisDate[date].push(flightInfo);
+        displayResults(flightsOnThisDate, true);
+      });
+    }
+  } catch (error) {
+    console.error(
+      `Error processing ${origin} to ${destination} on ${date}:`,
+      error.message
+    );
+
+    if (
+      error.message.includes("429") ||
+      error.message.includes("Rate limited")
+    ) {
+      isRateLimited = true;
+      document.querySelector("#rate-limited-message").style.display =
+        "block";
+    }
+  }
+
+  return flightsOnThisDate[date];
+}
+
 async function checkAllRoutes() {
   console.log("checkAllRoutes started");
 
@@ -242,7 +283,7 @@ async function checkAllRoutes() {
   }
 
   // Clear previous results
-  let routeListElement = document.querySelector(".route-list");
+  const routeListElement = document.querySelector(".route-list");
   document.querySelector("#rate-limited-message").style.display = "none";
   routeListElement.innerHTML = "";
 
@@ -292,7 +333,6 @@ async function checkAllRoutes() {
     progressElement.style.marginBottom = "10px";
     routeListElement.insertBefore(progressElement, routeListElement.firstChild);
 
-    const results = [];
     let completedRoutes = 0;
     let isRateLimited = false;
 
@@ -307,43 +347,8 @@ async function checkAllRoutes() {
       const updateProgress = () => {
         progressElement.textContent = `Checking ${origin} to ${destination}... ${completedRoutes}/${destinations.length}`;
       };
-      try {
-        const flights = await checkRoute(origin, destination, selectedDate);
-        if (flights && flights.length > 0) {
-          flights.forEach((flight) => {
-            const flightInfo = {
-              route: `${origin} (${flight.departureStationText}) to ${destination} (${flight.arrivalStationText}) - ${flight.flightCode}`,
-              date: flight.departureDate,
-              departure: `${flight.departure} (${flight.departureOffsetText})`,
-              arrival: `${flight.arrival} (${flight.arrivalOffsetText})`,
-              duration: flight.duration,
-            };
-
-            results.push(flightInfo);
-
-            if (!flightsByDate[selectedDate]) {
-              flightsByDate[selectedDate] = [];
-            }
-            flightsByDate[selectedDate].push(flightInfo);
-            displayResults(flightsByDate, true);
-          });
-        }
-      } catch (error) {
-        console.error(
-          `Error processing ${origin} to ${destination} on ${selectedDate}:`,
-          error.message
-        );
-
-        if (
-          error.message.includes("429") ||
-          error.message.includes("Rate limited")
-        ) {
-          isRateLimited = true;
-          document.querySelector("#rate-limited-message").style.display =
-            "block";
-          break;
-        }
-      }
+      const flights = await checkFlights(origin, destination, selectedDate);
+      flightsByDate[selectedDate]=flights;
 
       completedRoutes++;
       updateProgress();
@@ -353,28 +358,21 @@ async function checkAllRoutes() {
     progressElement.remove();
 
     if (!isRateLimited) {
-      if (results.length === 0) {
+      if (completedRoutes === 0) {
         routeListElement.innerHTML = `<p class="is-size-4 has-text-centered">No flights available for ${selectedDate}.</p>`;
       } else {
         setCachedResults(cacheKey, flightsByDate[selectedDate]);
         await displayResults(flightsByDate);
       }
-
-      const audioPlayer = document.getElementById("background-music");
-      if (audioPlayer) {
-        audioPlayer.pause();
-        audioPlayer.remove();
-      }
     }
   } catch (error) {
     console.error("An error occurred:", error.message);
     routeListElement.innerHTML = `<p>Error: ${error.message}</p>`;
+  }
 
-    const audioPlayer = document.getElementById("background-music");
-    if (audioPlayer) {
-      audioPlayer.pause();
-      audioPlayer.remove();
-    }
+  if (audioPlayer) {
+    audioPlayer.pause();
+    audioPlayer.remove();
   }
 }
 
