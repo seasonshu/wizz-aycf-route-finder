@@ -107,7 +107,15 @@ async function getDynamicUrl() {
   });
 }
 
-async function checkRoute(origin, destination, date) {
+async function checkRoute(origin, destination, date, forceRefresh) {
+  const cacheKey = makeCacheRouteKey(origin, destination, date);
+  const cachedResults = getCachedResults(cacheKey);
+
+  if (! forceRefresh && cachedResults) {
+    console.log("checkRoute: Using cached results for origin=", origin, ", destination=", destination, ", date=", date);
+    return cachedResults;
+  }
+
   try {
     const delay = Math.floor(Math.random() * (1000 - 500 + 1)) + 1000;
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -158,7 +166,10 @@ async function checkRoute(origin, destination, date) {
     }
 
     const responseData = await fetchResponse.json();
-    return responseData.flightsOutbound || [];
+    const flightsOutbound = responseData.flightsOutbound || [];
+    setCachedResults(cacheKey, flightsOutbound);
+
+    return flightsOutbound;
   } catch (error) {
     console.error("Error in checkRoute:", error);
     if (error.message.includes("429")) {
@@ -168,13 +179,23 @@ async function checkRoute(origin, destination, date) {
   }
 }
 
-function makeCacheKey(origin, date) {
-  return `${origin}-${date}`;
+function makeCacheRouteKey(origin, destination, date) {
+  return `VOLATILE_PAGE-${origin}-${destination}-${date}`;
+}
+
+function makeCacheItineraryKey(origin, date) {
+  return `VOLATILE_ITINERARY-${origin}-${date}`;
+}
+
+function getCachedResultsItineraryKeys() {
+  return Object.keys(localStorage).filter((key) =>
+    key.match(/^VOLATILE_ITINERARY-/)
+  );
 }
 
 function getCachedResultsKeys() {
   return Object.keys(localStorage).filter((key) =>
-    key.match(/^[A-Z]+-\d{4}-\d{2}-\d{2}$/)
+    key.match(/^VOLATILE_/)
   );
 }
 
@@ -194,7 +215,7 @@ function getCachedData(key) {
     if (Date.now() - timestamp < eightHoursInMs) {
       return cachedData;
     } else {
-      removeCachedResults(key);
+      removeCachedResults(key, true);
     }
   }
   return null;
@@ -218,18 +239,21 @@ function getCachedTimestamp(key) {
   return null;
 }
 
-function removeCachedResults(key) {
+function removeCachedResults(key, setRefresh = false) {
   localStorage.removeItem(key);
+  if(setRefresh && key.match(/^VOLATILE_ITINERARY-/)) {
+    setCachedResults(key, "Refresh");
+  }
 }
 
-async function checkFlights(origin, destination, date) {
-  console.log("checkFlights called for origin=", origin, ", destination=", destination, ", date=", date);
+async function checkFlights(origin, destination, date, forceRefresh) {
+  console.log("checkFlights called for origin=", origin, ", destination=", destination, ", date=", date, ", forceRefresh=", forceRefresh);
 
   let flightsOnThisDate = {};
   flightsOnThisDate[date] = [];
 
   try {
-    const flights = await checkRoute(origin, destination, date);
+    const flights = await checkRoute(origin, destination, date, forceRefresh);
     if (flights && flights.length > 0) {
       flights.forEach((flight) => {
         const flightInfo = {
@@ -287,11 +311,14 @@ async function checkAllRoutes() {
   document.querySelector("#rate-limited-message").style.display = "none";
   routeListElement.innerHTML = "";
 
-  const cacheKey = makeCacheKey(origin, selectedDate);
+  const cacheKey = makeCacheItineraryKey(origin, selectedDate);
   const cachedResults = getCachedResults(cacheKey);
   const timestamp = getCachedTimestamp(cacheKey);
+  let forceRefresh=false;
 
-  if (cachedResults) {
+  if (cachedResults == "Refresh") {
+    forceRefresh = true;
+  } else if (cachedResults) {
     console.log("Using cached itinerary results for origin=", origin, ", date=", selectedDate);
     displayResults({ [selectedDate]: cachedResults });
     const routeListElement = document.querySelector(".route-list");
@@ -347,7 +374,7 @@ async function checkAllRoutes() {
       const updateProgress = () => {
         progressElement.textContent = `Checking ${origin} to ${destination}... ${completedRoutes}/${destinations.length}`;
       };
-      const flights = await checkFlights(origin, destination, selectedDate);
+      const flights = await checkFlights(origin, destination, selectedDate, forceRefresh);
       flightsByDate[selectedDate]=flights;
 
       completedRoutes++;
@@ -439,8 +466,8 @@ function displayResults(flightsByDate, append = false) {
           const origin = document
             .getElementById("airport-input")
             .value.toUpperCase();
-          const cacheKey = makeCacheKey(origin, date);
-          removeCachedResults(cacheKey);
+          const cacheKey = makeCacheItineraryKey(origin, date);
+          removeCachedResults(cacheKey, true);
         });
 
         dateHeader.appendChild(clearCacheButton);
@@ -562,7 +589,7 @@ async function findReturnFlight(outboundFlight) {
   for (const returnDate of returnDates) {
     console.log(`Checking return flights for ${returnDate}`);
     try {
-      const flights = await checkRoute(origin, destination, returnDate);
+      const flights = await checkRoute(origin, destination, returnDate, false);
       if (Array.isArray(flights)) {
         const validReturnFlights = flights.filter((flight) => {
           const [flightHours, flightMinutes] = flight.departure
@@ -762,7 +789,7 @@ function displayCacheButton() {
 }
 
 function showCachedResults() {
-  const cacheKeys = getCachedResultsKeys();
+  const cacheKeys = getCachedResultsItineraryKeys();
 
   const resultsDiv = document.querySelector(".route-list");
   resultsDiv.innerHTML = "";
@@ -795,7 +822,7 @@ function showCachedResults() {
   }
 
   cacheKeys.forEach((key) => {
-    const [origin, year, month, day] = key.split("-");
+    const [type, origin, year, month, day] = key.split("-");
     const date = new Date(year, month - 1, day);
     const dayOfWeek = [
       "Sunday",
