@@ -246,11 +246,8 @@ function removeCachedResults(key, setRefresh = false) {
   }
 }
 
-async function checkFlights(origin, destination, date, forceRefresh) {
+async function checkFlights(origin, destination, date, control, forceRefresh) {
   console.log("checkFlights called for origin=", origin, ", destination=", destination, ", date=", date, ", forceRefresh=", forceRefresh);
-
-  let flightsOnThisDate = {};
-  flightsOnThisDate[date] = [];
 
   try {
     const flights = await checkRoute(origin, destination, date, forceRefresh);
@@ -264,8 +261,11 @@ async function checkFlights(origin, destination, date, forceRefresh) {
           duration: flight.duration,
         };
 
-        flightsOnThisDate[date].push(flightInfo);
-        displayResults(flightsOnThisDate, true);
+        if (! control.flightsByDate[date]) {
+          control.flightsByDate[date] = [];
+        }
+        control.flightsByDate[date].push(flightInfo);
+        displayResults(control.flightsByDate, true);
       });
     }
   } catch (error) {
@@ -278,13 +278,29 @@ async function checkFlights(origin, destination, date, forceRefresh) {
       error.message.includes("429") ||
       error.message.includes("Rate limited")
     ) {
-      isRateLimited = true;
+      control.isRateLimited = true;
       document.querySelector("#rate-limited-message").style.display =
         "block";
     }
   }
+}
 
-  return flightsOnThisDate[date];
+async function checkItinerary(origin, destination, date, control, forceRefresh) {
+  console.log("checkItinerary called for origin=", origin, ", destination=", destination, ", date=", date, ", forceRefresh=", forceRefresh);
+
+  if (control.completedRoutes > 0 && control.completedRoutes % 25 === 0) {
+    control.progressElement.textContent = `Taking a 15 second break to avoid rate limiting...`;
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+  }
+
+  const updateProgress = () => {
+    control.progressElement.textContent = `Checking ${origin} to ${destination}... ${control.completedRoutes}/${control.destinationCnt}`;
+  };
+  await checkFlights(origin, destination, date, control, forceRefresh);
+
+  control.completedRoutes++;
+  updateProgress();
+  await new Promise((resolve) => setTimeout(resolve, 200));
 }
 
 async function checkAllRoutes() {
@@ -299,7 +315,7 @@ async function checkAllRoutes() {
   const originInput = document.getElementById("airport-input");
   const dateSelect = document.getElementById("date-select");
   const origin = originInput.value.toUpperCase();
-  const selectedDate = dateSelect.value;
+  const date = dateSelect.value;
 
   if (!origin) {
     alert("Please enter a departure airport code.");
@@ -308,10 +324,15 @@ async function checkAllRoutes() {
 
   // Clear previous results
   const routeListElement = document.querySelector(".route-list");
+  if (!routeListElement) {
+    console.error("Error: .route-list element not found in the DOM");
+    return;
+  }
+
   document.querySelector("#rate-limited-message").style.display = "none";
   routeListElement.innerHTML = "";
 
-  const cacheKey = makeCacheItineraryKey(origin, selectedDate);
+  const cacheKey = makeCacheItineraryKey(origin, date);
   const cachedResults = getCachedResults(cacheKey);
   const timestamp = getCachedTimestamp(cacheKey);
   let forceRefresh=false;
@@ -319,8 +340,8 @@ async function checkAllRoutes() {
   if (cachedResults == "Refresh") {
     forceRefresh = true;
   } else if (cachedResults) {
-    console.log("Using cached itinerary results for origin=", origin, ", date=", selectedDate);
-    displayResults({ [selectedDate]: cachedResults });
+    console.log("Using cached itinerary results for origin=", origin, ", date=", date);
+    displayResults({ [date]: cachedResults });
     const routeListElement = document.querySelector(".route-list");
     const cacheNotification = document.createElement("div");
     cacheNotification.textContent =
@@ -344,52 +365,36 @@ async function checkAllRoutes() {
     return;
   }
 
-  const flightsByDate = {};
-
-  if (!routeListElement) {
-    console.error("Error: .route-list element not found in the DOM");
-    return;
-  }
-
   try {
     const destinations = await fetchDestinations(origin);
     console.log("Fetched destinations:", destinations);
 
-    const progressElement = document.createElement("div");
-    progressElement.id = "progress";
-    progressElement.style.marginBottom = "10px";
-    routeListElement.insertBefore(progressElement, routeListElement.firstChild);
-
-    let completedRoutes = 0;
-    let isRateLimited = false;
-
-    for (const destination of destinations) {
-      if (isRateLimited) break;
-
-      if (completedRoutes > 0 && completedRoutes % 25 === 0) {
-        progressElement.textContent = `Taking a 15 second break to avoid rate limiting...`;
-        await new Promise((resolve) => setTimeout(resolve, 15000));
-      }
-
-      const updateProgress = () => {
-        progressElement.textContent = `Checking ${origin} to ${destination}... ${completedRoutes}/${destinations.length}`;
-      };
-      const flights = await checkFlights(origin, destination, selectedDate, forceRefresh);
-      flightsByDate[selectedDate]=flights;
-
-      completedRoutes++;
-      updateProgress();
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    const control = {
+      progressElement : document.createElement("div"),
+      flightsByDate : {},
+      completedRoutes: 0,
+      isRateLimited : false,
+      destinationCnt : destinations.length,
     }
 
-    progressElement.remove();
+    control.progressElement.id = "progress";
+    control.progressElement.style.marginBottom = "10px";
+    routeListElement.insertBefore(control.progressElement, routeListElement.firstChild);
 
-    if (!isRateLimited) {
-      if (completedRoutes === 0) {
-        routeListElement.innerHTML = `<p class="is-size-4 has-text-centered">No flights available for ${selectedDate}.</p>`;
+    for (const destination of destinations) {
+      if (control.isRateLimited) break;
+
+      await checkItinerary(origin, destination, date, control, forceRefresh);
+    }
+
+    control.progressElement.remove();
+
+    if (! control.isRateLimited) {
+      if (control.completedRoutes === 0) {
+        routeListElement.innerHTML = `<p class="is-size-4 has-text-centered">No flights available for ${date}.</p>`;
       } else {
-        setCachedResults(cacheKey, flightsByDate[selectedDate]);
-        await displayResults(flightsByDate);
+        setCachedResults(cacheKey, control.flightsByDate[date]);
+        await displayResults(control.flightsByDate);
       }
     }
   } catch (error) {
