@@ -484,7 +484,7 @@ async function findNextAirports(origin, arrival, via, control) {
     if(via == "ANY") {
       nextAirports.push(...destinations);
     } else {
-      nextAirports.push(...destinations.filter(item => via.includes(item)));
+      nextAirports.push(...destinations.filter(item => via.length == 0 || via.includes(item)));
     }
   }
 
@@ -508,7 +508,8 @@ async function pushHopRequests(queue, hopRequest, via, control) {
 
 async function checkItinerary(origin, arrival, via, date, control, forceRefresh) {
   const queue = [];
-  await pushHopRequests(queue, makeHopInput(origin, /*destination*/ null, arrival, date, /*earliestDepartureDateTimeUTC*/ null, forceRefresh, [], maxHops, futureDays - control.futureDaysOffset), via, control);
+  const hops = (arrival || via) ? maxHops : 1;
+  await pushHopRequests(queue, makeHopInput(origin, /*destination*/ null, arrival, date, /*earliestDepartureDateTimeUTC*/ null, forceRefresh, [], hops, futureDays - control.futureDaysOffset), via, control);
 
   // async function cannot call itself recursively
   while(queue.length > 0) {
@@ -635,7 +636,7 @@ async function checkAllRoutes() {
     control.progressElement.remove();
 
     if (! control.isRateLimited) {
-      if (control.flightsByDate[date].length == 0) {
+      if (! control.flightsByDate[date] || control.flightsByDate[date].length == 0) {
         routeListElement.innerHTML = `<p class="is-size-4 has-text-centered">No flights available on ${date}.</p>`;
       } else {
         setCachedResults(cacheKey, control.flightsByDate[date]);
