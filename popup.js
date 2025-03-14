@@ -407,7 +407,7 @@ async function checkHop(params, control) {
 
         const flightHops = [...params.flightHopsPrev, flightInfo];
 
-        if(flight.arrivalStation != params.arrival) {
+        if(params.arrival && flight.arrivalStation != params.arrival) {
           if(params.hopsLeft > 0) {
             nextDepartureDate=dateToISOString(new Date(Date.parse(flight.arrivalDate)));
             const daysLeft = (params.date == nextDepartureDate) ? params.daysLeft : params.daysLeft - 1;
@@ -468,11 +468,11 @@ async function checkHop(params, control) {
 
 }
 
-async function findNextAirports(origin, arrival, via, control) {
+async function findNextAirports(origin, arrival, via, control, initial = false) {
   let nextAirports=[];
   const destinations = await fetchDestinations(origin);
 
-  if(arrival && ! destinations.includes(arrival) && via.length == 0) {
+  if(initial && arrival && ! destinations.includes(arrival) && via.length == 0) {
     throw new Error("No direct flight from " + origin + " to " + arrival + ". Specify list of via airports or set it to ANY. Note: ANY will cause huge search volume!");
   }
 
@@ -491,8 +491,8 @@ async function findNextAirports(origin, arrival, via, control) {
   return nextAirports;
 }
 
-async function pushHopRequests(queue, hopRequest, via, control) {
-  const nextAirports=await findNextAirports(hopRequest.origin, hopRequest.arrival, via, control);
+async function pushHopRequests(queue, hopRequest, via, control, initial = false) {
+  const nextAirports=await findNextAirports(hopRequest.origin, hopRequest.arrival, via, control, initial);
   if(nextAirports.length == 0) {
     console.log("Unable to determine next hops from origin ", hopRequest.origin);
     return;
@@ -506,10 +506,11 @@ async function pushHopRequests(queue, hopRequest, via, control) {
   control.destinationCnt += hopRequests.length;
 }
 
-async function checkItinerary(origin, arrival, via, date, control, forceRefresh) {
+async function checkItinerary(origin, destination, arrival, via, date, control, forceRefresh) {
   const queue = [];
-  const hops = (arrival || via) ? maxHops : 1;
-  await pushHopRequests(queue, makeHopInput(origin, /*destination*/ null, arrival, date, /*earliestDepartureDateTimeUTC*/ null, forceRefresh, [], hops, futureDays - control.futureDaysOffset), via, control);
+  const hops = (arrival || via.length > 0) ? maxHops : 1;
+  const days = futureDays - control.futureDaysOffset;
+  await pushHopRequests(queue, makeHopInput(origin, destination, arrival, date, /*earliestDepartureDateTimeUTC*/ null, forceRefresh, [], hops, days), via, control, true);
 
   // async function cannot call itself recursively
   while(queue.length > 0) {
@@ -536,14 +537,7 @@ async function checkItineraries(origin, arrival, via, date, control, forceRefres
     await fetchDestinations(arrival, true);
   }
 
-  if(arrival) {
-    await checkItinerary(origin, arrival, via, date, control, forceRefresh);
-  } else {
-    const nextAirports=await findNextAirports(origin, arrival, via, control);
-    for (const destination of nextAirports) {
-      await checkItinerary(origin, destination, /*via*/ [], date, control, forceRefresh);
-    }
-  }
+  await checkItinerary(origin, /*destination*/ null, arrival, via, date, control, forceRefresh);
 }
 
 async function checkAllRoutes() {
