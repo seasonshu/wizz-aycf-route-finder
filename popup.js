@@ -440,7 +440,7 @@ async function checkHop(params, control) {
           };
 
           control.flightsByDate[flightHops[0].date] = [...control.flightsByDate[flightHops[0].date], itinerary];
-          displayResults(control.flightsByDate[flightHops[0].date], true);
+          displayResults(control.flightsByDate, true);
           itineraryCompleted = true;
         }
       });
