@@ -30,7 +30,7 @@ async function fetchDestinations(origin, silent = false) {
         }
         return destinationIds;
       } else {
-        throw new Error("Failed to fetch destinations for " + origin);
+        throw new Error("Failed to fetch destinations for " + origin + ". Try refreshing the wizzair.com page");
       }
     }
   }
@@ -67,7 +67,7 @@ async function fetchDestinations(origin, silent = false) {
             } else if (response && response.error) {
               reject(new Error(response.error));
             } else {
-              reject(new Error("Failed to fetch destinations for " + origin));
+              reject(new Error("Failed to fetch destinations for " + origin + ". Try refreshing the wizzair.com page"));
             }
           }
         );
@@ -288,18 +288,30 @@ function fixUTCDateTime(dateTime, offsetText) {
   return dateTimeToISOString(dateTimeIso);
 }
 
-function calculateDuration(dateObj1, dateObj2) {
+function calculateDuration(dateObj1, dateObj2, format) {
+  const _MS_PER_DAY = 1000 * 60 * 60 * 24;
   const _MS_PER_HOUR = 1000 * 60 * 60;
   const _MS_PER_MIN = 1000 * 60;
 
   let date1 = new Date(dateObj1.toString());
   let date2 = new Date(dateObj2.toString());
 
-  let diffMin = (date2.getTime() - date1.getTime()) / (1000 * 60);
-  let hours = Math.floor(diffMin/60);
-  let minutes =(diffMin%60);
+  const diffMin = (date2.getTime() - date1.getTime()) / (1000 * 60);
+  const days    = Math.floor( diffMin / (60 * 24));
+  const hours   = Math.floor((diffMin % (60 * 24)) / (60));
+  const minutes = (diffMin % 60);
 
-  return hours.toString().padStart(2, "0") + "h " + minutes.toString().padStart(2, "0") + "m";
+  let text=null;
+  switch(format) {
+    case "HM":
+      return hours.toString().padStart(2, "0") + "h " + (minutes != 0 ? minutes.toString().padStart(2, "0") + "m" : "");
+    case "DH":
+      return (days != 0 ? days.toString().padStart(1, "0") + "d " : "") + hours.toString().padStart(2, "0") + "h ";
+    case "DHM":
+      return (days != 0 ? days.toString().padStart(1, "0") + "d " : "") + hours.toString().padStart(2, "0") + "h " + (minutes != 0 ? minutes.toString().padStart(2, "0") + "m" : "");
+    default:
+      return null;
+  }
 }
 
 function incrementDate(dateObj, increment) {
@@ -323,7 +335,9 @@ function makeHopInput(origin, destination, arrival, date, earliestDepartureDateT
 }
 
 async function checkHop(params, control) {
-  console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
+  if(enableItineraryCache) {
+    console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
+  }
 
   if (! control.flightsByDate[params.date]) {
     control.flightsByDate[params.date] = [];
@@ -343,16 +357,16 @@ async function checkHop(params, control) {
     }
 
     const updateProgress = () => {
-      control.progressElement.textContent = `Checking ${params.origin} to ${params.destination}... ${control.completedRoutes}/${control.destinationCnt}`;
+      control.progressElement.textContent = `Checking ${params.origin} to ${params.destination}... ${control.completedRoutes}/${control.destinationCnt} on ${params.date}`;
     };
 
-    const flights = await checkRoute(params.origin, params.destination, params.date, control.forceRefresh);
+    const flights = await checkRoute(params.origin, params.destination, params.date, control.itinerary.forceRefresh);
     if (flights && flights.length > 0) {
       flights.forEach((flight) => {
         // Touch upon sloppy data returned by server
         const departureDateTimeUTC = fixUTCDateTime(flight.departureDateTimeIso, flight.departureOffsetText);
         const arrivalDateTimeUTC = fixUTCDateTime(flight.arrivalDateTimeIso, flight.arrivalOffsetText);
-        let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC);
+        let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC, "DHM");
         // Calculate earliest next departure date and time
         const layerOverDateTimeIso = new Date(arrivalDateTimeUTC /*flight.arrivalDateTimeIso*/);
         layerOverDateTimeIso.setHours(layerOverDateTimeIso.getHours() + minLayerOver);
@@ -388,8 +402,11 @@ async function checkHop(params, control) {
             });
           }
 
-          layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[0].arrivalDateTimeUTC, departureDateTimeUTC) + " ---";
+          layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[0].arrivalDateTimeUTC, departureDateTimeUTC, "DHM") + " ---";
         }
+
+        nextDepartureDate = dateToISOString(new Date(Date.parse(flight.arrivalDate)));
+        const daysLeft = (params.date == nextDepartureDate) ? params.daysLeft : params.daysLeft - 1;
 
         const flightInfo = {
           origin: params.origin,
@@ -411,8 +428,6 @@ async function checkHop(params, control) {
 
         if(params.arrival && flight.arrivalStation != params.arrival) {
           if(params.hopsLeft > 1) {
-            nextDepartureDate=dateToISOString(new Date(Date.parse(flight.arrivalDate)));
-            const daysLeft = (params.date == nextDepartureDate) ? params.daysLeft : params.daysLeft - 1;
             const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeIso, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
             nextFlightLegInputs.push(nextParams);
           }
@@ -425,22 +440,30 @@ async function checkHop(params, control) {
             ""
           ;
           const stopsText = flightHops.length == 1 ? "Direct" : (flightHops.length - 1) + " stop" + ((flightHops.length - 1) > 1 ? "s" : "");
-          const outDuration = calculateDuration(flightHops[0].departureDateTimeUTC, flightHops[flightHops.length - 1].arrivalDateTimeUTC);
+          const outDuration = calculateDuration(flightHops[0].departureDateTimeUTC, flightHops[flightHops.length - 1].arrivalDateTimeUTC, "DHM");
 
-          const itinerary = {
-              route: routeText,
-              out: {
-                departure: `${flightHops[0].departure}`,
-                arrival: `${flightHops[flightHops.length - 1].arrival}`,
-                hops: flightHops.length,
-                stopsText: stopsText,
-                duration: outDuration,
-                flights: flightHops,
-              }
+          const oneWay = {
+            route: routeText,
+            origin: `${flightHops[0].origin}`,
+            destination: `${flightHops[flightHops.length - 1].destination}`,
+            departure: `${flightHops[0].departure}`,
+            arrival: `${flightHops[flightHops.length - 1].arrival}`,
+            hops: flightHops.length,
+            stopsText: stopsText,
+            duration: outDuration,
+            flights: flightHops,
+            departureDateTimeUTC: flightHops[0].departureDateTimeUTC,
+            arrivalDateTimeUTC: flightHops[flightHops.length - 1].arrivalDateTimeUTC,
+            earliestDepartureDateTimeIso: nextEarliestDepartureDateTimeIso,
+            daysLeft: daysLeft,
           };
 
-          control.flightsByDate[flightHops[0].date] = [...control.flightsByDate[flightHops[0].date], itinerary];
-          displayResults(control.flightsByDate, true);
+          const itinerary = (control.direction == "out") ? structuredClone(control.itinerary) : control.itinerary;
+          itinerary[control.direction] = oneWay;
+
+          control.flightsByDate[flightHops[0].date].push(itinerary);
+          control.itinerariesCnt++;
+          displayResults(control.flightsByDate, control.direction, /*flags*/ {append: true, dateToAppend: flightHops[0].date, outboundItinerary: null, itinerariesCnt: control.itinerariesCnt});
           itineraryCompleted = true;
         }
       });
@@ -474,7 +497,7 @@ async function findNextAirports(hopRequest, control) {
   let nextAirports=[];
   const destinations = await fetchDestinations(hopRequest.origin);
 
-  if(hopRequest.arrival && ! destinations.includes(hopRequest.arrival) && control.via.length == 0) {
+  if(hopRequest.arrival && ! destinations.includes(hopRequest.arrival) && control.itinerary.via.length == 0) {
     throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search.");
   }
 
@@ -483,13 +506,13 @@ async function findNextAirports(hopRequest, control) {
   }
 
   if(hopRequest.maxHops == 1 || hopRequest.hopsLeft > 1) {
-    if(control.via.includes("ANY")) {
+    if(control.itinerary.via.includes("ANY")) {
       nextAirports.push(...destinations);
     } else {
       nextAirports.push(...destinations.filter(item =>
         (! hopRequest.arrival && hopRequest.maxHops == 1)
         ||
-        (hopRequest.arrival && control.via.includes(item)))
+        (hopRequest.arrival && control.itinerary.via.includes(item)))
       );
     }
   }
@@ -514,10 +537,9 @@ async function pushHopRequests(queue, hopRequest, control) {
 
 async function checkItinerary(origin, destination, arrival, date, control) {
   const queue = [];
-  const hops = (arrival || control.via.length > 0) ? (control.via.includes("ANY") ? 2 : maxHops) : 1;
+  const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? 2 : maxHops) : 1;
   const days = futureDays - control.futureDaysOffset;
-  // TODO
-  await pushHopRequests(queue, makeHopInput(origin, destination, arrival, date, /*earliestDepartureDateTimeUTC*/ null, [], hops, hops, days), control);
+  await pushHopRequests(queue, makeHopInput(origin, destination, arrival, date, control.earliestDepartureDateTimeUTC, [], hops, hops, days), control);
 
   // async function cannot call itself recursively
   while(queue.length > 0) {
@@ -533,11 +555,9 @@ async function checkItinerary(origin, destination, arrival, date, control) {
 }
 
 async function checkItineraries(origin, arrival, date, control) {
-  control.destinationCnt = 0;
-
   // Verify input
   await fetchDestinations(origin, true);
-  for (const hop of control.via) {
+  for (const hop of control.itinerary.via) {
     if(hop != "ANY") {
       await fetchDestinations(hop, true);
     }
@@ -625,10 +645,15 @@ async function checkAllRoutes() {
       progressElement : document.createElement("div"),
       flightsByDate : {},
       completedRoutes: 0,
+      itinerariesCnt: 0,
       isRateLimited : false,
       destinationCnt : 0,
-      via: via,
-      forceRefresh: forceRefresh,
+      direction: "out",
+      earliestDepartureDateTimeUTC: null,
+      itinerary: {
+        via: via,
+        forceRefresh: forceRefresh,
+      },
       futureDaysOffset: futureDaysOffset,
     }
 
@@ -659,35 +684,115 @@ async function checkAllRoutes() {
   }
 }
 
-function formatDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function displayResults(flightsByDate, append = false) {
-  const resultsDiv = document.querySelector(".route-list");
-  if (!resultsDiv) {
+function displayResults(flightsByDate, direction = "out", flags = {append: false, dateToAppend: null, outboundItinerary: null}) {
+  const topRouteElement = document.querySelector(".route-list");
+  if (! topRouteElement) {
     console.error("Error: .route-list element not found in the DOM");
     return;
   }
 
-  if (!append) {
-    resultsDiv.innerHTML = "";
+  topRouteElement.style.fontFamily = "Arial, sans-serif";
+  topRouteElement.style.maxWidth = "600px";
+  topRouteElement.style.margin = "0 auto";
+
+  if(direction == "out") {
+    if (! flags.append) {
+      topRouteElement.innerHTML = "";
+    }
   }
 
-  resultsDiv.style.fontFamily = "Arial, sans-serif";
-  resultsDiv.style.maxWidth = "600px";
-  resultsDiv.style.margin = "0 auto";
+  let flightsFound = 0;
+  if(! flags.itinerariesCnt) {
+    for (const [date, itineraries] of Object.entries(flightsByDate)) {
+      flightsFound += itineraries.length;
+    }
+  } else {
+    flightsFound = flags.itinerariesCnt;
+  }
 
+  if(flightsFound == 0 && flags.outboundItinerary) {
+    const outRouteElement = flags.outboundItinerary["out"].element;
+    if (! outRouteElement) {
+      console.error("Flight item element not found");
+      return;
+    }
+
+    let returnItineraryDiv = outRouteElement.querySelector(".return-flights");
+    if (returnItineraryDiv) {
+      returnItineraryDiv.remove();
+    }
+
+    returnItineraryDiv = document.createElement("div");
+    returnItineraryDiv.classList.add("return-flights");
+    returnItineraryDiv.style.marginTop = "15px";
+    returnItineraryDiv.style.borderTop = "2px solid #ddd";
+    returnItineraryDiv.style.paddingTop = "15px";
+    outRouteElement.appendChild(returnItineraryDiv);
+
+    const noFlightsMsg = document.createElement("p");
+    noFlightsMsg.textContent =
+      "No return flights found with the minimum layover time of " + minLayerOver + "h before return in the next " + futureDays + " days";
+    noFlightsMsg.style.fontStyle = "italic";
+    returnItineraryDiv.appendChild(noFlightsMsg);
+  }
+
+  let itinerariesCnt = 0;
   for (const [date, itineraries] of Object.entries(flightsByDate)) {
-    if (itineraries.length > 0) {
-      let dateHeader = append
+    if (flags.dateToAppend && flags.dateToAppend != date) {
+      continue;
+    }
+
+    if (itineraries.length == 0) {
+      continue;
+    }
+
+    const itinerariesToProcess = flags.append ? [itineraries[itineraries.length - 1]] : itineraries;
+    for (const itinerary of itinerariesToProcess) {
+      let outRouteElement = null;
+      let returnHeader = null;
+      let returnItineraryDiv = null;
+      if(direction == "ret") {
+        outRouteElement = itinerary["out"].element;
+        if (! outRouteElement) {
+           console.error("Flight item element not found");
+          return;
+        }
+
+        returnItineraryDiv = outRouteElement.querySelector(".return-flights");
+      }
+
+      if(direction == "ret" && (returnItineraryDiv == null || ! flags.append)) {
+        if (itinerariesCnt == 0 && returnItineraryDiv) {
+          returnItineraryDiv.remove();
+          returnItineraryDiv = null;
+        }
+
+        if(! returnItineraryDiv) {
+          returnItineraryDiv = document.createElement("div");
+          returnItineraryDiv.classList.add("return-flights");
+          returnItineraryDiv.style.marginTop = "15px";
+          returnItineraryDiv.style.borderTop = "2px solid #ddd";
+          returnItineraryDiv.style.paddingTop = "15px";
+          outRouteElement.appendChild(returnItineraryDiv);
+
+          returnTotal = document.createElement("h4");
+          returnTotal.setAttribute("return-total", "");
+          returnTotal.textContent = `Return Flights (${flightsFound} found)`;
+          returnTotal.style.marginBottom = "15px";
+          returnTotal.style.fontWeight = "bold";
+          returnItineraryDiv.appendChild(returnTotal);
+        }
+      }
+
+      if(direction == "ret") {
+        returnTotal = returnItineraryDiv.querySelector(`h4[return-total=""]`)
+        returnTotal.textContent = `Return Flights (${flightsFound} found)`;
+      }
+
+      const resultsDiv = (direction == "out") ? topRouteElement : returnItineraryDiv;
+
+      let dateHeader = (flags.append || direction == "ret")
         ? resultsDiv.querySelector(`h3[data-date="${date}"]`)
-        : null;
-      let itineraryList = append
-        ? resultsDiv.querySelector(`ul[data-date="${date}"]`)
         : null;
 
       if (!dateHeader) {
@@ -699,6 +804,7 @@ function displayResults(flightsByDate, append = false) {
         dateHeader.style.backgroundColor = "#f0f0f0";
         dateHeader.style.padding = "10px";
         dateHeader.style.borderRadius = "5px";
+        resultsDiv.appendChild(dateHeader);
 
         const dateText = document.createElement("span");
         dateText.textContent = new Date(date).toLocaleDateString("en-US", {
@@ -706,37 +812,42 @@ function displayResults(flightsByDate, append = false) {
           day: "numeric",
           month: "long",
           year: "numeric",
-        });
+        }) + ((direction == "ret") ? ": " + direction.toUpperCase() : "");
         dateHeader.appendChild(dateText);
 
-        const clearCacheButton = document.createElement("button");
-        clearCacheButton.textContent = "♻️ Refresh Cache";
-        clearCacheButton.style.padding = "5px 10px";
+        if(direction == "out") {
+          const clearCacheButton = document.createElement("button");
+          clearCacheButton.textContent = "♻️ Refresh Cache";
+          clearCacheButton.style.padding = "5px 10px";
 
-        clearCacheButton.style.fontSize = "12px";
-        clearCacheButton.style.backgroundColor = "#f0f0f0";
-        clearCacheButton.style.border = "1px solid #ccc";
-        clearCacheButton.style.borderRadius = "3px";
-        clearCacheButton.style.cursor = "pointer";
-        clearCacheButton.addEventListener("click", () => {
-          const origin = document
-            .getElementById("dep-airport-input")
-            .value.toUpperCase();
-          const destination = document
-            .getElementById("arr-airport-input")
-            .value.toUpperCase();
-          const via = document
-            .getElementById("via-airport-input")
-            .value.toUpperCase();
-          const cacheKey = makeCacheItineraryKey(origin, destination, via, date);
-          removeCachedResults(cacheKey, true);
-        });
+          clearCacheButton.style.fontSize = "12px";
+          clearCacheButton.style.backgroundColor = "#f0f0f0";
+          clearCacheButton.style.border = "1px solid #ccc";
+          clearCacheButton.style.borderRadius = "3px";
+          clearCacheButton.style.cursor = "pointer";
+          clearCacheButton.addEventListener("click", () => {
+            const origin = document
+              .getElementById("dep-airport-input")
+              .value.toUpperCase();
+            const destination = document
+              .getElementById("arr-airport-input")
+              .value.toUpperCase();
+            const via = document
+              .getElementById("via-airport-input")
+              .value.toUpperCase();
+            const cacheKey = makeCacheItineraryKey(origin, destination, via, date);
+            removeCachedResults(cacheKey, true);
+          });
 
-        dateHeader.appendChild(clearCacheButton);
-        resultsDiv.appendChild(dateHeader);
+          dateHeader.appendChild(clearCacheButton);
+        }
       }
 
-      if (!itineraryList) {
+      let itineraryList = (flags.append || direction == "ret")
+          ? resultsDiv.querySelector(`ul[data-date="${date}"]`)
+          : null;
+
+      if (! itineraryList) {
         itineraryList = document.createElement("ul");
         itineraryList.setAttribute("data-date", date);
         itineraryList.style.listStyleType = "none";
@@ -744,99 +855,111 @@ function displayResults(flightsByDate, append = false) {
         resultsDiv.appendChild(itineraryList);
       }
 
-      const itinerariesToProcess = append ? [itineraries[itineraries.length - 1]] : itineraries;
-      for (const itinerary of itinerariesToProcess) {
-        const itineraryItem = document.createElement("li");
-        itineraryItem.style.marginBottom = "15px";
-        itineraryItem.style.padding = "10px";
-        itineraryItem.style.border = "1px solid #ddd";
-        itineraryItem.style.borderRadius = "5px";
-        itineraryItem.style.display = "flex";
-        itineraryItem.style.flexDirection = "column";
-        itineraryItem.style.gap = "5px";
+      const itineraryItem = document.createElement("li");
+      itineraryItem.style.marginBottom = "15px";
+      itineraryItem.style.padding = "10px";
+      itineraryItem.style.border = "1px solid #ddd";
+      itineraryItem.style.borderRadius = "5px";
+      itineraryItem.style.display = "flex";
+      itineraryItem.style.flexDirection = "column";
+      itineraryItem.style.gap = "5px";
+      itineraryList.appendChild(itineraryItem);
 
-        itineraryList.appendChild(itineraryItem);
-        itinerary.element = itineraryItem;
+      const routeDiv = document.createElement("div");
+      routeDiv.textContent = itinerary[direction].route;
+      routeDiv.style.fontWeight = "bold";
+      routeDiv.style.marginBottom = "5px";
+      itineraryItem.appendChild(routeDiv);
 
-        const routeDiv = document.createElement("div");
-        routeDiv.textContent = itinerary.route;
-        routeDiv.style.fontWeight = "bold";
-        routeDiv.style.marginBottom = "5px";
-        itineraryItem.appendChild(routeDiv);
+      const stopsDiv = document.createElement("div");
+      itineraryItem.appendChild(stopsDiv);
+      stopsDiv.textContent = `️${itinerary[direction].stopsText}`;
 
-        const detailsDiv = document.createElement("div");
-        detailsDiv.style.display = "flex";
-        detailsDiv.style.justifyContent = "space-between";
-        itineraryItem.appendChild(detailsDiv);
+      const detailsDiv = document.createElement("div");
+      detailsDiv.style.display = "flex";
+      detailsDiv.style.justifyContent = "space-between";
+      itineraryItem.appendChild(detailsDiv);
 
-        const stopsDiv = document.createElement("div");
-        stopsDiv.textContent = `️${itinerary.out.stopsText}`;
+      const departureDiv = document.createElement("div");
+      detailsDiv.appendChild(departureDiv);
+      departureDiv.textContent = `✈️ ${itinerary[direction].departure}`;
 
-        const departureDiv = document.createElement("div");
-        departureDiv.textContent = `✈️ ${itinerary.out.departure}`;
+      const arrivalDiv = document.createElement("div");
+      detailsDiv.appendChild(arrivalDiv);
+      arrivalDiv.textContent = `🛬 ${itinerary[direction].arrival}`;
 
-        const arrivalDiv = document.createElement("div");
-        arrivalDiv.textContent = `🛬 ${itinerary.out.arrival}`;
+      const durationDiv = document.createElement("div");
+      detailsDiv.appendChild(durationDiv);
+      durationDiv.textContent = `⏱️ ${itinerary[direction].duration}`;
 
-        const durationDiv = document.createElement("div");
-        durationDiv.textContent = `⏱️ ${itinerary.out.duration}`;
+      if (direction == "ret") {
+        const timeAtDestinationDiv = document.createElement("div");
+        itineraryItem.appendChild(timeAtDestinationDiv);
+        const timeAtDestination = calculateDuration(itinerary["out"].arrivalDateTimeUTC, itinerary["ret"].departureDateTimeUTC, "DHM");
+        timeAtDestinationDiv.textContent = `🕒 Time until return: ${timeAtDestination}`;
+        timeAtDestinationDiv.style.fontSize = "0.9em";
+        timeAtDestinationDiv.style.color = "#4a4a4a";
+        timeAtDestinationDiv.style.marginTop = "5px";
+      }
 
-        detailsDiv.appendChild(stopsDiv);
-        detailsDiv.appendChild(departureDiv);
-        detailsDiv.appendChild(arrivalDiv);
-        detailsDiv.appendChild(durationDiv);
+      if (itinerary[direction] && Array.isArray(itinerary[direction].flights)) {
+        let flightList = (flags.append || direction == "ret")
+            ? itineraryItem.querySelector(`ul[data-date="${date}"]`)
+            : null;
 
-        if (itinerary.out && Array.isArray(itinerary.out.flights)) {
+        if (! flightList) {
           flightList = document.createElement("ul");
           flightList.setAttribute("data-date", date);
           flightList.style.listStyleType = "none";
           flightList.style.padding = "0";
           itineraryItem.appendChild(flightList);
+        }
 
-          const flightItem = document.createElement("li");
-          flightItem.style.marginBottom = "15px";
-          flightItem.style.padding = "10px";
-          flightItem.style.border = "1px solid #ddd";
-          flightItem.style.borderRadius = "5px";
-          flightItem.style.display = "flex";
-          flightItem.style.flexDirection = "column";
-          flightItem.style.gap = "5px";
+        const flightItem = document.createElement("li");
+        flightItem.style.marginBottom = "15px";
+        flightItem.style.padding = "10px";
+        flightItem.style.border = "1px solid #ddd";
+        flightItem.style.borderRadius = "5px";
+        flightItem.style.display = "flex";
+        flightItem.style.flexDirection = "column";
+        flightItem.style.gap = "5px";
 
-          flightList.appendChild(flightItem);
+        flightList.appendChild(flightItem);
 
-          for (const flight of itinerary.out.flights) {
-            if(flight.layoverDuration) {
-              const layoverDiv = document.createElement("div");
-              layoverDiv.style.fontWeight = "bold";
-              layoverDiv.textContent = flight.layoverDuration;
-              layoverDiv.style.textAlign = "center";
-              flightItem.appendChild(layoverDiv);
-            }
-            const flightDiv = document.createElement("div");
-            flightDiv.textContent = flight.route;
-            flightDiv.style.fontWeight = "bold";
-            flightDiv.style.marginBottom = "5px";
-            flightItem.appendChild(flightDiv);
-
-            const detailsDiv = document.createElement("div");
-            detailsDiv.style.display = "flex";
-            detailsDiv.style.justifyContent = "space-between";
-            flightItem.appendChild(detailsDiv);
-
-            const departureDiv = document.createElement("div");
-            departureDiv.textContent = `✈️ Departure: ${flight.departure}`;
-
-            const arrivalDiv = document.createElement("div");
-            arrivalDiv.textContent = `🛬 Arrival: ${flight.arrival}`;
-
-            const durationDiv = document.createElement("div");
-            durationDiv.textContent = `⏱️ Duration: ${flight.duration}`;
-
-            detailsDiv.appendChild(departureDiv);
-            detailsDiv.appendChild(arrivalDiv);
-            detailsDiv.appendChild(durationDiv);
+        for (const flight of itinerary[direction].flights) {
+          if(flight.layoverDuration) {
+            const layoverDiv = document.createElement("div");
+            layoverDiv.style.fontWeight = "bold";
+            layoverDiv.textContent = flight.layoverDuration;
+            layoverDiv.style.textAlign = "center";
+            flightItem.appendChild(layoverDiv);
           }
+          const flightDiv = document.createElement("div");
+          flightDiv.textContent = flight.route;
+          flightDiv.style.fontWeight = "bold";
+          flightDiv.style.marginBottom = "5px";
+          flightItem.appendChild(flightDiv);
 
+          const detailsDiv = document.createElement("div");
+          detailsDiv.style.display = "flex";
+          detailsDiv.style.justifyContent = "space-between";
+          flightItem.appendChild(detailsDiv);
+
+          const departureDiv = document.createElement("div");
+          departureDiv.textContent = `✈️ Departure: ${flight.departure}`;
+
+          const arrivalDiv = document.createElement("div");
+          arrivalDiv.textContent = `🛬 Arrival: ${flight.arrival}`;
+
+          const durationDiv = document.createElement("div");
+          durationDiv.textContent = `⏱️ Duration: ${flight.duration}`;
+
+          detailsDiv.appendChild(departureDiv);
+          detailsDiv.appendChild(arrivalDiv);
+          detailsDiv.appendChild(durationDiv);
+        }
+
+        if(direction == "out") {
           const origin = document
             .getElementById("dep-airport-input")
             .value.toUpperCase();
@@ -857,100 +980,85 @@ function displayResults(flightsByDate, append = false) {
               "is-size-7"
             );
             findReturnButton.addEventListener("click", () => {
-              itinerary.element = itineraryItem;
+              itinerary[direction].element = itineraryItem;
               findReturnFlight(itinerary);
               findReturnButton.remove();
             });
             flightItem.appendChild(findReturnButton);
           } else if (cachedReturnData) {
             const { results: returnFlights } = JSON.parse(cachedReturnData);
-            itinerary.element = itineraryItem;
+            itinerary[direction].element = itineraryItem;
             displayReturnFlights(flight, returnFlights);
           }
         }
       }
     }
+
+    itinerariesCnt++;
   }
 }
-
-async function findReturnFlight(outboundFlight) {
-  const origin = outboundFlight.route.split(" to ")[1].split(" (")[0];
-  const destination = outboundFlight.route.split(" to ")[0].split(" (")[0];
-  const outboundDate = new Date(outboundFlight.date);
-  const outboundArrivalTime = outboundFlight.arrival.split(" (")[0];
-
+async function findReturnFlight(outboundItinerary) {
+  const origin = outboundItinerary["out"].destination;
+  const arrival = outboundItinerary["out"].origin;
+  const outboundArrivalDate = outboundItinerary["out"].flights[outboundItinerary["out"].flights.length - 1].date;
   const returnDates = [];
-  for (let i = 0; i < 4; i++) {
-    const date = new Date(outboundDate);
-    date.setDate(outboundDate.getDate() + i);
-    returnDates.push(formatDate(date));
+  for (let i = 0; i <= outboundItinerary["out"].daysLeft; i++) {
+    const date = new Date(outboundArrivalDate);
+    date.setDate(date.getDate() + i);
+    returnDates.push(dateToISOString(date));
   }
-
-  const returnFlights = [];
 
   const progressElement = document.createElement("div");
   progressElement.classList.add("return-flight-progress");
   progressElement.style.marginTop = "10px";
   progressElement.style.fontSize = "0.9em";
   progressElement.style.color = "#000";
-  outboundFlight.element.appendChild(progressElement);
+  outboundItinerary["out"].element.appendChild(progressElement);
 
   let checkedDates = 0;
-  const updateProgress = () => {
-    progressElement.textContent = `Checking return flights: ${checkedDates} of ${returnDates.length} dates checked...`;
+
+  const control = null;
+  const controlCache = {
+    flightsByDate : {},
+    destinationCnt: returnDates.length,
+    itinerariesCnt: 0,
   };
 
-  updateProgress();
-
+  let destinationCnt = returnDates.length;
   for (const returnDate of returnDates) {
-    console.log(`Checking return flights for ${returnDate}`);
-    try {
-      const flights = await checkRoute(origin, destination, returnDate, false);
-      if (Array.isArray(flights)) {
-        const validReturnFlights = flights.filter((flight) => {
-          const [flightHours, flightMinutes] = flight.departure
-            .split(" (")[0]
-            .split(":");
-          const flightDate = new Date(returnDate);
-          flightDate.setHours(
-            parseInt(flightHours, 10),
-            parseInt(flightMinutes, 10),
-            0,
-            0
-          );
+    if(enableItineraryCache) {
+      console.log(`Checking return flights for ${returnDate}`);
+    }
 
-          const [outboundHours, outboundMinutes] =
-            outboundArrivalTime.split(":");
-          const outboundArrival = new Date(outboundDate);
-          outboundArrival.setHours(
-            parseInt(outboundHours, 10),
-            parseInt(outboundMinutes, 10),
-            0,
-            0
-          );
-          return flightDate > outboundArrival;
-        });
-        console.log(
-          `Found ${validReturnFlights.length} valid return flights for ${returnDate}`
-        );
-        returnFlights.push(...validReturnFlights);
-      } else {
-        console.error(`Unexpected response format for ${returnDate}:`, flights);
-      }
+    const control = {
+      progressElement : progressElement,
+      flightsByDate : {},
+      completedRoutes: 0,
+      itinerariesCnt: controlCache.itinerariesCnt,
+      isRateLimited : false,
+      destinationCnt : controlCache.destinationCnt,
+      direction: "ret",
+      earliestDepartureDateTimeUTC: outboundItinerary["out"].earliestDepartureDateTimeIso,
+      itinerary: outboundItinerary,
+      futureDaysOffset: futureDays - outboundItinerary["out"].daysLeft,
+    }
+
+    try {
+      await checkItineraries(origin, arrival, returnDate, control);
     } catch (error) {
       console.error(`Error checking return flight for ${returnDate}:`, error);
     }
     checkedDates++;
-    updateProgress();
+    controlCache.flightsByDate[returnDate] = new Map(control.flightsByDate[returnDate]);
+    controlCache.itinerariesCnt += control.flightsByDate[returnDate].length;
+    controlCache.destinationCnt = control.destinationCnt - 1;
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
   progressElement.remove();
 
-  console.log(`Total return flights found: ${returnFlights.length}`);
-  displayReturnFlights(outboundFlight, returnFlights);
-
-  return returnFlights;
+  //await displayResults(controlCache.flightsByDate, "ret", /*flags*/ {append: false, dateToAppend: null, outboundItinerary: outboundItinerary, itinerariesCnt: controlCache.itinerariesCnt});
 }
 
 function calculateTimeAtDestination(outboundFlight, returnFlight) {
@@ -1198,7 +1306,7 @@ function displayCachedResult(key) {
       audioPlayer.remove();
     }
 
-    const [origin, year, month, day] = key.split("-");
+    const [type, origin, arrival, via, year, month, day] = key.split("-");
     const date = `${year}-${month}-${day}`;
 
     displayResults({ [date]: cachedResults });
