@@ -308,15 +308,14 @@ function incrementDate(dateObj, increment) {
   return increasedDate;
 }
 
-function makeHopInput(origin, destination, arrival, date, earliestDepartureDateTimeUTC, forceRefresh, flightHopsPrev, maxHops, hopsLeft, daysLeft) {
+function makeHopInput(origin, destination, arrival, date, earliestDepartureDateTimeUTC, flightHopsPrev, maxHops, hopsLeft, daysLeft) {
   return {
     origin: origin,
     destination: destination,
-    arrival:arrival,
-    date:date,
+    arrival: arrival,
+    date: date,
     earliestDepartureDateTimeUTC: earliestDepartureDateTimeUTC,
-    forceRefresh:forceRefresh,
-    flightHopsPrev:flightHopsPrev,
+    flightHopsPrev: flightHopsPrev,
     maxHops: maxHops,
     hopsLeft: hopsLeft,
     daysLeft: daysLeft,
@@ -324,7 +323,7 @@ function makeHopInput(origin, destination, arrival, date, earliestDepartureDateT
 }
 
 async function checkHop(params, control) {
-  console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date, ", forceRefresh=", params.forceRefresh);
+  console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
 
   if (! control.flightsByDate[params.date]) {
     control.flightsByDate[params.date] = [];
@@ -347,7 +346,7 @@ async function checkHop(params, control) {
       control.progressElement.textContent = `Checking ${params.origin} to ${params.destination}... ${control.completedRoutes}/${control.destinationCnt}`;
     };
 
-    const flights = await checkRoute(params.origin, params.destination, params.date, params.forceRefresh);
+    const flights = await checkRoute(params.origin, params.destination, params.date, control.forceRefresh);
     if (flights && flights.length > 0) {
       flights.forEach((flight) => {
         // Touch upon sloppy data returned by server
@@ -414,7 +413,7 @@ async function checkHop(params, control) {
           if(params.hopsLeft > 1) {
             nextDepartureDate=dateToISOString(new Date(Date.parse(flight.arrivalDate)));
             const daysLeft = (params.date == nextDepartureDate) ? params.daysLeft : params.daysLeft - 1;
-            const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeIso, params.forceRefresh, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
+            const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeIso, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
             nextFlightLegInputs.push(nextParams);
           }
         } else {
@@ -457,7 +456,7 @@ async function checkHop(params, control) {
         if(debugItinerarySearch) {
           console.log("Retrying for the next day: " + dateToISOString(incrementDate(params.date, 1)) + " from origin" + params.origin);
         }
-        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, dateToISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.forceRefresh, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
+        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, dateToISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
         nextFlightLegInputs.push(nextParams);
       }
     }
@@ -471,26 +470,26 @@ async function checkHop(params, control) {
 
 }
 
-async function findNextAirports(origin, arrival, via, maxHops, hopsLeft, control) {
+async function findNextAirports(hopRequest, control) {
   let nextAirports=[];
-  const destinations = await fetchDestinations(origin);
+  const destinations = await fetchDestinations(hopRequest.origin);
 
-  if(arrival && ! destinations.includes(arrival) && via.length == 0) {
-    throw new Error("No direct flights from " + origin + " to " + arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search.");
+  if(hopRequest.arrival && ! destinations.includes(hopRequest.arrival) && control.via.length == 0) {
+    throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search.");
   }
 
-  if(arrival && destinations.includes(arrival)) {
-    nextAirports.push(arrival);
+  if(hopRequest.arrival && destinations.includes(hopRequest.arrival)) {
+    nextAirports.push(hopRequest.arrival);
   }
 
-  if(maxHops == 1 || hopsLeft > 1) {
-    if(via.includes("ANY")) {
+  if(hopRequest.maxHops == 1 || hopRequest.hopsLeft > 1) {
+    if(control.via.includes("ANY")) {
       nextAirports.push(...destinations);
     } else {
       nextAirports.push(...destinations.filter(item =>
-        (! arrival && maxHops == 1)
+        (! hopRequest.arrival && hopRequest.maxHops == 1)
         ||
-        (arrival && via.includes(item)))
+        (hopRequest.arrival && control.via.includes(item)))
       );
     }
   }
@@ -498,8 +497,8 @@ async function findNextAirports(origin, arrival, via, maxHops, hopsLeft, control
   return nextAirports;
 }
 
-async function pushHopRequests(queue, hopRequest, via, control) {
-  const nextAirports=await findNextAirports(hopRequest.origin, hopRequest.arrival, via, hopRequest.maxHops, hopRequest.hopsLeft, control);
+async function pushHopRequests(queue, hopRequest, control) {
+  const nextAirports=await findNextAirports(hopRequest, control);
   if(nextAirports.length == 0) {
     console.log("Unable to determine next hops from origin ", hopRequest.origin);
     return;
@@ -507,17 +506,18 @@ async function pushHopRequests(queue, hopRequest, via, control) {
 
   const hopRequests = [];
   for (const destination of nextAirports) {
-    hopRequests.push(makeHopInput(hopRequest.origin, destination, hopRequest.arrival, hopRequest.date, hopRequest.earliestDepartureDateTimeUTC, hopRequest.forceRefresh, hopRequest.flightHopsPrev, hopRequest.maxHops, hopRequest.hopsLeft, hopRequest.daysLeft));
+    hopRequests.push(makeHopInput(hopRequest.origin, destination, hopRequest.arrival, hopRequest.date, hopRequest.earliestDepartureDateTimeUTC, hopRequest.flightHopsPrev, hopRequest.maxHops, hopRequest.hopsLeft, hopRequest.daysLeft));
   }
   queue.push(...hopRequests);
   control.destinationCnt += hopRequests.length;
 }
 
-async function checkItinerary(origin, destination, arrival, via, date, control, forceRefresh) {
+async function checkItinerary(origin, destination, arrival, date, control) {
   const queue = [];
-  const hops = (arrival || via.length > 0) ? (via.includes("ANY") ? 2 : maxHops) : 1;
+  const hops = (arrival || control.via.length > 0) ? (control.via.includes("ANY") ? 2 : maxHops) : 1;
   const days = futureDays - control.futureDaysOffset;
-  await pushHopRequests(queue, makeHopInput(origin, destination, arrival, date, /*earliestDepartureDateTimeUTC*/ null, forceRefresh, [], hops, hops, days), via, control);
+  // TODO
+  await pushHopRequests(queue, makeHopInput(origin, destination, arrival, date, /*earliestDepartureDateTimeUTC*/ null, [], hops, hops, days), control);
 
   // async function cannot call itself recursively
   while(queue.length > 0) {
@@ -526,18 +526,18 @@ async function checkItinerary(origin, destination, arrival, via, date, control, 
     const nextFlightLegInputs = await checkHop(job, control);
     if (nextFlightLegInputs) {
       for (const nextFlightLegInput of nextFlightLegInputs) {
-        await pushHopRequests(queue, nextFlightLegInput, via, control);
+        await pushHopRequests(queue, nextFlightLegInput, control);
       }
     }
   }
 }
 
-async function checkItineraries(origin, arrival, via, date, control, forceRefresh) {
+async function checkItineraries(origin, arrival, date, control) {
   control.destinationCnt = 0;
 
   // Verify input
   await fetchDestinations(origin, true);
-  for (const hop of via) {
+  for (const hop of control.via) {
     if(hop != "ANY") {
       await fetchDestinations(hop, true);
     }
@@ -546,7 +546,7 @@ async function checkItineraries(origin, arrival, via, date, control, forceRefres
     await fetchDestinations(arrival, true);
   }
 
-  await checkItinerary(origin, /*destination*/ null, arrival, via, date, control, forceRefresh);
+  await checkItinerary(origin, /*destination*/ null, arrival, date, control);
 }
 
 async function checkAllRoutes() {
@@ -627,6 +627,8 @@ async function checkAllRoutes() {
       completedRoutes: 0,
       isRateLimited : false,
       destinationCnt : 0,
+      via: via,
+      forceRefresh: forceRefresh,
       futureDaysOffset: futureDaysOffset,
     }
 
@@ -634,7 +636,7 @@ async function checkAllRoutes() {
     control.progressElement.style.marginBottom = "10px";
     routeListElement.insertBefore(control.progressElement, routeListElement.firstChild);
 
-    await checkItineraries(origin, arrival, via, date, control, forceRefresh);
+    await checkItineraries(origin, arrival, date, control);
 
     control.progressElement.remove();
 
