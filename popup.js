@@ -487,7 +487,11 @@ async function findNextAirports(origin, arrival, via, maxHops, hopsLeft, control
     if(via.includes("ANY")) {
       nextAirports.push(...destinations);
     } else {
-      nextAirports.push(...destinations.filter(item => maxHops == 1 || via.includes(item)));
+      nextAirports.push(...destinations.filter(item =>
+        (! arrival && maxHops == 1)
+        ||
+        (arrival && via.includes(item)))
+      );
     }
   }
 
