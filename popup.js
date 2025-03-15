@@ -6,7 +6,7 @@ const futureDays=3;
 const debugItinerarySearch=false;
 
 // Even when itinerary cache is disabled, route (page) cache remains enabled
-const enableItineraryCache=false;
+const enableItineraryCache=true;
 
 async function fetchDestinations(origin, silent = false) {
   if(! origin) {
