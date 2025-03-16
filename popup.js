@@ -1103,6 +1103,11 @@ function showCachedResults() {
   }
 
   cacheKeys.forEach((key) => {
+    const cachedResults = getCachedResults(key);
+    if (cachedResults == "Refresh") {
+      return;
+    }
+
     const [type, origin, arrival, via, year, month, day] = key.split("-");
     const date = new Date(year, month - 1, day);
     const dayOfWeek = [
@@ -1132,12 +1137,19 @@ function showCachedResults() {
       monthNames[date.getMonth()]
     } ${date.getDate()}`;
 
-    const button = document.createElement("button");
-    button.style.marginTop = "5px";
-    button.textContent = `${origin} - ${formattedDate}`;
-    button.classList.add("button", "is-small", "is-light", "mr-2", "mb-2");
-    button.addEventListener("click", () => displayCachedResult(key));
-    resultsDiv.appendChild(button);
+    const showButton = document.createElement("showButton");
+    showButton.style.marginTop = "5px";
+    showButton.textContent = `${origin} - ${arrival} ` + (via ? `- (via: ${via}) ` : ``) + `- ${formattedDate}`;
+    showButton.classList.add("button", "is-small", "is-light", "mr-2", "mb-2");
+    showButton.addEventListener("click", () => displayCachedResult(key));
+    resultsDiv.appendChild(showButton);
+
+    const clearButton = document.createElement("clearButton");
+    clearButton.style.marginTop = "5px";
+    clearButton.textContent = `Clear`;
+    clearButton.classList.add("button", "is-small", "is-danger", "is-light");
+    clearButton.addEventListener("click", () => clearCachedResult(key, showButton, clearButton));
+    resultsDiv.appendChild(clearButton);
   });
 }
 
@@ -1164,6 +1176,18 @@ function displayCachedResult(key) {
     }
 
     displayResults(cachedResults);
+  } else {
+    alert("Cached data not found.");
+  }
+}
+
+function clearCachedResult(key, showButton, clearButton) {
+  const cachedResults = getCachedResults(key);
+  const timestamp = getCachedTimestamp(key);
+  if (cachedResults) {
+      removeCachedResults(key, true);
+      showButton.remove();
+      clearButton.remove();
   } else {
     alert("Cached data not found.");
   }
