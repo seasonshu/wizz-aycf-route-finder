@@ -430,13 +430,7 @@ async function checkHop(params, control) {
             nextFlightLegInputs.push(nextParams);
           }
         } else {
-          const routeText =
-            (flightHops.length > 1)
-            ?
-            `${flightHops[0].origin} (${flightHops[0].departureStationText}) to ${flightHops[flightHops.length - 1].destination} (${flightHops[flightHops.length - 1].arrivalStationText})`
-            :
-            ""
-          ;
+          const routeText = `${flightHops[0].origin} (${flightHops[0].departureStationText}) to ${flightHops[flightHops.length - 1].destination} (${flightHops[flightHops.length - 1].arrivalStationText})`;
           const stopsText = flightHops.length == 1 ? "Direct" : (flightHops.length - 1) + " stop" + ((flightHops.length - 1) > 1 ? "s" : "");
           const outDuration = calculateDuration(flightHops[0].departureDateTimeUTC, flightHops[flightHops.length - 1].arrivalDateTimeUTC, "DHM");
 
@@ -675,7 +669,7 @@ async function checkAllRoutes() {
       if (! control.flightsByDate[date] || control.flightsByDate[date].length == 0) {
         routeListElement.innerHTML = `<p class="is-size-4 has-text-centered">No flights available on ${date}.</p>`;
       } else {
-        setCachedResults(cacheKey, control.flightsByDate );
+        setCachedResults(cacheKey, control.flightsByDate);
         await displayResults(control.flightsByDate);
       }
     }
@@ -860,32 +854,34 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
       itineraryItem.style.gap = "5px";
       itineraryList.appendChild(itineraryItem);
 
-      const routeDiv = document.createElement("div");
-      routeDiv.textContent = itinerary[direction].route;
-      routeDiv.style.fontWeight = "bold";
-      routeDiv.style.marginBottom = "5px";
-      itineraryItem.appendChild(routeDiv);
+      if (itinerary[direction] && Array.isArray(itinerary[direction].flights) && itinerary[direction].flights.length > 1) {
+        const routeDiv = document.createElement("div");
+        routeDiv.textContent = itinerary[direction].route;
+        routeDiv.style.fontWeight = "bold";
+        routeDiv.style.marginBottom = "5px";
+        itineraryItem.appendChild(routeDiv);
 
-      const stopsDiv = document.createElement("div");
-      itineraryItem.appendChild(stopsDiv);
-      stopsDiv.textContent = `️${itinerary[direction].stopsText}`;
+        const stopsDiv = document.createElement("div");
+        itineraryItem.appendChild(stopsDiv);
+        stopsDiv.textContent = `️${itinerary[direction].stopsText}`;
 
-      const detailsDiv = document.createElement("div");
-      detailsDiv.style.display = "flex";
-      detailsDiv.style.justifyContent = "space-between";
-      itineraryItem.appendChild(detailsDiv);
+        const detailsDiv = document.createElement("div");
+        detailsDiv.style.display = "flex";
+        detailsDiv.style.justifyContent = "space-between";
+        itineraryItem.appendChild(detailsDiv);
 
-      const departureDiv = document.createElement("div");
-      detailsDiv.appendChild(departureDiv);
-      departureDiv.textContent = `✈️ ${itinerary[direction].departure}`;
+        const departureDiv = document.createElement("div");
+        detailsDiv.appendChild(departureDiv);
+        departureDiv.textContent = `✈️ ${itinerary[direction].departure}`;
 
-      const arrivalDiv = document.createElement("div");
-      detailsDiv.appendChild(arrivalDiv);
-      arrivalDiv.textContent = `🛬 ${itinerary[direction].arrival}`;
+        const arrivalDiv = document.createElement("div");
+        detailsDiv.appendChild(arrivalDiv);
+        arrivalDiv.textContent = `🛬 ${itinerary[direction].arrival}`;
 
-      const durationDiv = document.createElement("div");
-      detailsDiv.appendChild(durationDiv);
-      durationDiv.textContent = `⏱️ ${itinerary[direction].duration}`;
+        const durationDiv = document.createElement("div");
+        detailsDiv.appendChild(durationDiv);
+        durationDiv.textContent = `⏱️ ${itinerary[direction].duration}`;
+      }
 
       if (direction == "ret") {
         const timeAtDestinationDiv = document.createElement("div");
