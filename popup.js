@@ -8,6 +8,24 @@ const debugItinerarySearch=false;
 // Even when itinerary cache is disabled, route (page) cache remains enabled
 const enableItineraryCache=true;
 
+function extractDestinations(origin, silent, data, isCached) {
+  const routesFromOrigin = data.routes.find(
+    (route) => route.departureStation.id === origin
+  );
+  if (routesFromOrigin && routesFromOrigin.arrivalStations) {
+    const destinationIds = routesFromOrigin.arrivalStations.map(
+      (station) => station.id
+    );
+    if(! silent && debugItinerarySearch) {
+      console.log(`Routes from ${origin}:`, destinationIds, (isCached ? ` (cached)` : ``));
+    }
+    return destinationIds;
+  } else {
+    throw new Error(`No routes found from ${origin}`);
+    return null;
+  }
+}
+
 async function fetchDestinations(origin, silent = false) {
   if(! origin) {
     throw new Error(`fetchDestinations: origin cannot be empty`);
@@ -18,20 +36,7 @@ async function fetchDestinations(origin, silent = false) {
     const data = JSON.parse(pageData);
     const oneHourInMs = 60 * 60 * 1000;
     if (Date.now() - data.timestamp < oneHourInMs && data.routes) {
-      const routesFromOrigin = data.routes.find(
-        (route) => route.departureStation.id === origin
-      );
-      if (routesFromOrigin && routesFromOrigin.arrivalStations) {
-        const destinationIds = routesFromOrigin.arrivalStations.map(
-          (station) => station.id
-        );
-        if(! silent && debugItinerarySearch) {
-          console.log(`Routes from ${origin}:`, destinationIds,` (cached)`);
-        }
-        return destinationIds;
-      } else {
-        throw new Error("Failed to fetch destinations for " + origin + ". Try refreshing the wizzair.com page");
-      }
+      return extractDestinations(origin, silent, data, true);
     }
   }
 
@@ -48,18 +53,11 @@ async function fetchDestinations(origin, silent = false) {
                 routes: response.routes,
                 timestamp: Date.now(),
               };
+
               localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
 
-              const routesFromOrigin = response.routes.find(
-                (route) => route.departureStation.id === origin
-              );
-              if (routesFromOrigin && routesFromOrigin.arrivalStations) {
-                const destinationIds = routesFromOrigin.arrivalStations.map(
-                  (station) => station.id
-                );
-                if(! silent && debugItinerarySearch) {
-                  console.log(`Routes from ${origin}:`, destinationIds);
-                }
+              const destinationIds = extractDestinations(origin, silent, response, false);
+               if(destinationIds) {
                 resolve(destinationIds);
               } else {
                 reject(new Error(`No routes found from ${origin}`));
