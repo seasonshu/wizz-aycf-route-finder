@@ -208,41 +208,41 @@ function makeCacheItineraryKey(origin, destination, via, date) {
 }
 
 function getCachedResultsItineraryKeys() {
-  return Object.keys(localStorage).filter((key) =>
-    key.match(/^VOLATILE_ITINERARY-/)
+  return Object.keys(localStorage).filter((cacheKey) =>
+    cacheKey.match(/^VOLATILE_ITINERARY-/)
   );
 }
 
 function getCachedResultsKeys() {
-  return Object.keys(localStorage).filter((key) =>
-    key.match(/^VOLATILE_/)
+  return Object.keys(localStorage).filter((cacheKey) =>
+    cacheKey.match(/^VOLATILE_/)
   );
 }
 
-function setCachedResults(key, results) {
+function setCachedResults(cacheKey, results) {
   const cacheData = {
     results: results,
     timestamp: Date.now(),
   };
-  localStorage.setItem(key, JSON.stringify(cacheData));
+  localStorage.setItem(cacheKey, JSON.stringify(cacheData));
 }
 
-function getCachedData(key) {
-  const cachedData = localStorage.getItem(key);
+function getCachedData(cacheKey) {
+  const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) {
     const { results, timestamp } = JSON.parse(cachedData);
     const eightHoursInMs = 8 * 60 * 60 * 1000;
     if (Date.now() - timestamp < eightHoursInMs) {
       return cachedData;
     } else {
-      removeCachedResults(key, true);
+      removeCachedResults(cacheKey, true);
     }
   }
   return null;
 }
 
-function getCachedResults(key) {
-  const cachedData = getCachedData(key);
+function getCachedResults(cacheKey) {
+  const cachedData = getCachedData(cacheKey);
   if (cachedData) {
     const { results, timestamp } = JSON.parse(cachedData);
     return results;
@@ -250,8 +250,8 @@ function getCachedResults(key) {
   return null;
 }
 
-function getCachedTimestamp(key) {
-  const cachedData = getCachedData(key);
+function getCachedTimestamp(cacheKey) {
+  const cachedData = getCachedData(cacheKey);
   if (cachedData) {
     const { results, timestamp } = JSON.parse(cachedData);
     return timestamp;
@@ -259,10 +259,10 @@ function getCachedTimestamp(key) {
   return null;
 }
 
-function removeCachedResults(key, setRefresh = false) {
-  localStorage.removeItem(key);
-  if(setRefresh && key.match(/^VOLATILE_ITINERARY-/)) {
-    setCachedResults(key, "Refresh");
+function removeCachedResults(cacheKey, setRefresh = false) {
+  localStorage.removeItem(cacheKey);
+  if(setRefresh && cacheKey.match(/^VOLATILE_ITINERARY-/)) {
+    setCachedResults(cacheKey, "Refresh");
   }
 }
 
@@ -316,6 +316,10 @@ function incrementDate(dateObj, increment) {
   let date = new Date(dateObj.toString());
   let increasedDate = new Date(date.getTime() + (increment * 24*60*60*1000));
   return increasedDate;
+}
+
+function makeFlightName(origin, arrival, via) {
+  return `${origin} ` + (arrival ? `- ${arrival} ` : ``) + (via.length > 0 ? ` (via: ` + (typeof(via) == "arrays" ? via.join(", ") : via) + `)` : ``);
 }
 
 function makeHopInput(origin, destination, arrival, date, earliestDepartureDateTimeUTC, flightHopsPrev, maxHops, hopsLeft, daysLeft) {
@@ -567,6 +571,24 @@ async function checkItineraries(origin, arrival, date, control) {
   await checkItinerary(origin, /*destination*/ null, arrival, date, control);
 }
 
+function displayCachedHeader(cacheKey, cachedResults) {
+  const timestamp = getCachedTimestamp(cacheKey);
+
+  const routeListElement = document.querySelector(".route-list");
+  const cacheNotification = document.createElement("div");
+  cacheNotification.textContent =
+    `Using cached results. Click the "Refresh Cache" button to fetch new data. Cache date: ${new Date(timestamp).toLocaleString()}`;
+  cacheNotification.style.backgroundColor = "#e6f7ff";
+  cacheNotification.style.border = "1px solid #91d5ff";
+  cacheNotification.style.borderRadius = "4px";
+  cacheNotification.style.padding = "10px";
+  cacheNotification.style.marginBottom = "15px";
+  routeListElement.insertBefore(
+    cacheNotification,
+    routeListElement.firstChild
+  );
+}
+
 async function checkAllRoutes() {
   console.log("checkAllRoutes started");
 
@@ -607,27 +629,15 @@ async function checkAllRoutes() {
     :
     getCachedResults(cacheKey) == "Refresh" ? "Refresh" : null
     ;
-  const timestamp = getCachedTimestamp(cacheKey);
   let forceRefresh=false;
 
   if (cachedResults == "Refresh") {
     forceRefresh = true;
   } else if (cachedResults) {
     console.log("Using cached itinerary results for origin=", origin, ", arrival=", arrival, ", via=", via, ", date=", date);
+
     displayResults(cachedResults);
-    const routeListElement = document.querySelector(".route-list");
-    const cacheNotification = document.createElement("div");
-    cacheNotification.textContent =
-      `Using cached results. Click the "Refresh Cache" button to fetch new data. Cache date: ${new Date(timestamp).toLocaleString()}`;
-    cacheNotification.style.backgroundColor = "#e6f7ff";
-    cacheNotification.style.border = "1px solid #91d5ff";
-    cacheNotification.style.borderRadius = "4px";
-    cacheNotification.style.padding = "10px";
-    cacheNotification.style.marginBottom = "15px";
-    routeListElement.insertBefore(
-      cacheNotification,
-      routeListElement.firstChild
-    );
+    displayCachedHeader(cacheKey, cachedResults);
 
     // Stop and remove audio player when using cached results
     const audioPlayer = document.getElementById("background-music");
@@ -667,7 +677,17 @@ async function checkAllRoutes() {
 
     if (! control.isRateLimited) {
       if (! control.flightsByDate[date] || control.flightsByDate[date].length == 0) {
-        routeListElement.innerHTML = `<p class="is-size-4 has-text-centered">No flights available on ${date}.</p>`;
+        const noFlights =`No ` + makeFlightName(origin, arrival, via) + ` flights available`;
+        displayResultsHeaderDate(routeListElement, date);
+
+        const noResultsMessage = document.createElement("p");
+        noResultsMessage.classList.add(
+          "is-size-4",
+          "has-text-centered",
+        );
+        noResultsMessage.textContent = noFlights;
+        routeListElement.appendChild(noResultsMessage);
+        setCachedResults(cacheKey, { [date] : `NoResult-${noFlights}` } );
       } else {
         setCachedResults(cacheKey, control.flightsByDate);
         await displayResults(control.flightsByDate);
@@ -682,6 +702,62 @@ async function checkAllRoutes() {
     audioPlayer.pause();
     audioPlayer.remove();
   }
+}
+
+function displayResultsHeaderDate(resultsDiv, date, flags = {}, direction = "out") {
+      let dateHeader = (flags.append || direction == "ret")
+        ? resultsDiv.querySelector(`h3[data-date="${date}"]`)
+        : null;
+
+      if (!dateHeader) {
+        dateHeader = document.createElement("h3");
+        dateHeader.setAttribute("data-date", date);
+        dateHeader.style.display = "flex";
+        dateHeader.style.justifyContent = "space-between";
+        dateHeader.style.alignItems = "center";
+        dateHeader.style.backgroundColor = "#f0f0f0";
+        dateHeader.style.padding = "10px";
+        dateHeader.style.borderRadius = "5px";
+        resultsDiv.appendChild(dateHeader);
+
+        const dateText = document.createElement("span");
+        dateText.textContent = new Date(date).toLocaleDateString("en-US", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }) + ((direction == "ret") ? ": " + direction.toUpperCase() : "");
+        dateHeader.appendChild(dateText);
+
+        if(direction == "out") {
+          const clearCacheButton = document.createElement("button");
+          clearCacheButton.textContent = "♻️ Refresh Cache";
+          clearCacheButton.style.padding = "5px 10px";
+
+          clearCacheButton.style.fontSize = "12px";
+          clearCacheButton.style.backgroundColor = "#f0f0f0";
+          clearCacheButton.style.border = "1px solid #ccc";
+          clearCacheButton.style.borderRadius = "3px";
+          clearCacheButton.style.cursor = "pointer";
+          clearCacheButton.addEventListener("click", () => {
+            const origin = document
+              .getElementById("dep-airport-input")
+              .value.toUpperCase();
+            const destination = document
+              .getElementById("arr-airport-input")
+              .value.toUpperCase();
+            const via = document
+              .getElementById("via-airport-input")
+              .value.toUpperCase();
+            const cacheKey = makeCacheItineraryKey(origin, destination, via, date);
+            removeCachedResults(cacheKey, true);
+          });
+
+          dateHeader.appendChild(clearCacheButton);
+        }
+      }
+
+      return dateHeader;
 }
 
 function displayResults(flightsByDate, direction = "out", flags = {append: false, dateToAppend: null, outItineraryLI: null}) {
@@ -736,6 +812,19 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
       continue;
     }
 
+    if (typeof(itineraries) == "string" && itineraries.substring(0, 8) == "NoResult") {
+      dateHeader = displayResultsHeaderDate(topRouteElement, date, flags, direction);
+
+      const noResultsMessage = document.createElement("p");
+      noResultsMessage.classList.add(
+        "is-size-4",
+        "has-text-centered",
+      );
+      noResultsMessage.textContent = itineraries.substring(9);
+      topRouteElement.appendChild(noResultsMessage);
+      return;
+    }
+
     if (itineraries.length == 0) {
       continue;
     }
@@ -780,57 +869,7 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
 
       const resultsDiv = (direction == "out") ? topRouteElement : returnItineraryDiv;
 
-      let dateHeader = (flags.append || direction == "ret")
-        ? resultsDiv.querySelector(`h3[data-date="${date}"]`)
-        : null;
-
-      if (!dateHeader) {
-        dateHeader = document.createElement("h3");
-        dateHeader.setAttribute("data-date", date);
-        dateHeader.style.display = "flex";
-        dateHeader.style.justifyContent = "space-between";
-        dateHeader.style.alignItems = "center";
-        dateHeader.style.backgroundColor = "#f0f0f0";
-        dateHeader.style.padding = "10px";
-        dateHeader.style.borderRadius = "5px";
-        resultsDiv.appendChild(dateHeader);
-
-        const dateText = document.createElement("span");
-        dateText.textContent = new Date(date).toLocaleDateString("en-US", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        }) + ((direction == "ret") ? ": " + direction.toUpperCase() : "");
-        dateHeader.appendChild(dateText);
-
-        if(direction == "out") {
-          const clearCacheButton = document.createElement("button");
-          clearCacheButton.textContent = "♻️ Refresh Cache";
-          clearCacheButton.style.padding = "5px 10px";
-
-          clearCacheButton.style.fontSize = "12px";
-          clearCacheButton.style.backgroundColor = "#f0f0f0";
-          clearCacheButton.style.border = "1px solid #ccc";
-          clearCacheButton.style.borderRadius = "3px";
-          clearCacheButton.style.cursor = "pointer";
-          clearCacheButton.addEventListener("click", () => {
-            const origin = document
-              .getElementById("dep-airport-input")
-              .value.toUpperCase();
-            const destination = document
-              .getElementById("arr-airport-input")
-              .value.toUpperCase();
-            const via = document
-              .getElementById("via-airport-input")
-              .value.toUpperCase();
-            const cacheKey = makeCacheItineraryKey(origin, destination, via, date);
-            removeCachedResults(cacheKey, true);
-          });
-
-          dateHeader.appendChild(clearCacheButton);
-        }
-      }
+      let dateHeader = displayResultsHeaderDate(resultsDiv, date, flags, direction);
 
       let itineraryList = (flags.append || direction == "ret")
           ? resultsDiv.querySelector(`ul[data-date="${date}"]`)
@@ -1102,13 +1141,13 @@ function showCachedResults() {
     return;
   }
 
-  cacheKeys.forEach((key) => {
-    const cachedResults = getCachedResults(key);
+  cacheKeys.forEach((cacheKey) => {
+    const cachedResults = getCachedResults(cacheKey);
     if (cachedResults == "Refresh") {
       return;
     }
 
-    const [type, origin, arrival, via, year, month, day] = key.split("-");
+    const [type, origin, arrival, via, year, month, day] = cacheKey.split("-");
     const date = new Date(year, month - 1, day);
     const dayOfWeek = [
       "Sunday",
@@ -1137,36 +1176,40 @@ function showCachedResults() {
       monthNames[date.getMonth()]
     } ${date.getDate()}`;
 
+    const detailsDiv = document.createElement("div");
+    detailsDiv.style.display = "flex";
+    detailsDiv.style.justifyContent = "space-between";
+    resultsDiv.appendChild(detailsDiv);
+
     const showButton = document.createElement("showButton");
     showButton.style.marginTop = "5px";
-    showButton.textContent = `${origin} - ${arrival} ` + (via ? `- (via: ${via}) ` : ``) + `- ${formattedDate}`;
+    showButton.textContent = makeFlightName(origin, arrival, via) + `- ${formattedDate}`;
     showButton.classList.add("button", "is-small", "is-light", "mr-2", "mb-2");
-    showButton.addEventListener("click", () => displayCachedResult(key));
-    resultsDiv.appendChild(showButton);
+    showButton.addEventListener("click", () => displayCachedResult(cacheKey));
+    detailsDiv.appendChild(showButton);
 
     const clearButton = document.createElement("clearButton");
     clearButton.style.marginTop = "5px";
     clearButton.textContent = `Clear`;
     clearButton.classList.add("button", "is-small", "is-danger", "is-light");
-    clearButton.addEventListener("click", () => clearCachedResult(key, showButton, clearButton));
-    resultsDiv.appendChild(clearButton);
+    clearButton.addEventListener("click", () => clearCachedResult(cacheKey, showButton, clearButton));
+    detailsDiv.appendChild(clearButton);
   });
 }
 
 function clearAllCachedResults() {
   const cacheKeys = getCachedResultsKeys();
 
-  cacheKeys.forEach((key) => {
-    removeCachedResults(key);
+  cacheKeys.forEach((cacheKey) => {
+    removeCachedResults(cacheKey);
   });
 
   const resultsDiv = document.querySelector(".route-list");
   resultsDiv.innerHTML = "<p>All cached results have been cleared.</p>";
 }
 
-function displayCachedResult(key) {
-  const cachedResults = getCachedResults(key);
-  const timestamp = getCachedTimestamp(key);
+function displayCachedResult(cacheKey) {
+  const cachedResults = getCachedResults(cacheKey);
   if (cachedResults) {
     // Stop and remove audio player when displaying cached results
     const audioPlayer = document.getElementById("background-music");
@@ -1176,16 +1219,17 @@ function displayCachedResult(key) {
     }
 
     displayResults(cachedResults);
+    displayCachedHeader(cacheKey, cachedResults);
   } else {
     alert("Cached data not found.");
   }
 }
 
-function clearCachedResult(key, showButton, clearButton) {
-  const cachedResults = getCachedResults(key);
-  const timestamp = getCachedTimestamp(key);
+function clearCachedResult(cacheKey, showButton, clearButton) {
+  const cachedResults = getCachedResults(cacheKey);
+  const timestamp = getCachedTimestamp(cacheKey);
   if (cachedResults) {
-      removeCachedResults(key, true);
+      removeCachedResults(cacheKey, true);
       showButton.remove();
       clearButton.remove();
   } else {
@@ -1196,8 +1240,8 @@ function clearCachedResult(key, showButton, clearButton) {
 function checkCacheValidity() {
   const cacheKeys = getCachedResultsKeys();
 
-  cacheKeys.forEach((key) => {
-    getCachedResults(key);
+  cacheKeys.forEach((cacheKey) => {
+    getCachedResults(cacheKey);
   });
 }
 
