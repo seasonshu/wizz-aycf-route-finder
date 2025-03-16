@@ -43,7 +43,7 @@ async function fetchDestinations(origin, silent = false) {
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const currentTab = tabs[0];
-      if (currentTab.url.includes("multipass.wizzair.com")) {
+      if (currentTab.url && currentTab.url.includes("multipass.wizzair.com")) {
         chrome.tabs.sendMessage(
           currentTab.id,
           { action: "getDestinations", origin: origin },
