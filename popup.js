@@ -3,10 +3,19 @@ console.log("popup.js loaded");
 const maxHops=3;
 const minLayerOver=3;
 const futureDays=3;
+
+// DEBUG
 const debugItinerarySearch=false;
 
+// CACHE
 // Even when itinerary cache is disabled, route (page) cache remains enabled
 const enableItineraryCache=true;
+const pageValidForHours=1;
+const resultsValidForHours=8;
+
+// CONST
+const wizzair_aycf_page="https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
+
 
 function extractDestinations(origin, silent, data, isCached) {
   const routesFromOrigin = data.routes.find(
@@ -22,7 +31,6 @@ function extractDestinations(origin, silent, data, isCached) {
     return destinationIds;
   } else {
     throw new Error(`No routes found from ${origin}`);
-    return null;
   }
 }
 
@@ -31,15 +39,13 @@ async function fetchDestinations(origin, silent = false) {
     throw new Error(`fetchDestinations: origin cannot be empty`);
   }
 
-  const pageData = localStorage.getItem("wizz_page_data");
-  if (pageData) {
-    const data = JSON.parse(pageData);
-    const oneHourInMs = 60 * 60 * 1000;
-    if (Date.now() - data.timestamp < oneHourInMs && data.routes) {
-      return extractDestinations(origin, silent, data, true);
-    }
+  const pageData = getCachedPageData("routes");
+
+  if (pageData && pageData.routes) {
+    return extractDestinations(origin, silent, pageData, true);
   }
 
+  console.log("Retrieving routes from multipass.wizzair.com");
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const currentTab = tabs[0];
@@ -48,13 +54,21 @@ async function fetchDestinations(origin, silent = false) {
           currentTab.id,
           { action: "getDestinations", origin: origin },
           function (response) {
+            if (chrome.runtime.lastError) {
+              if(chrome.runtime.lastError.message == "Could not establish connection. Receiving end does not exist.") {
+                console.log(chrome.runtime.lastError.message);
+                reject({message: "Refresh page " + wizzair_aycf_page + " and log in if prompted"});
+              } else {
+                reject(chrome.runtime.lastError);
+              }
+            }
+
             if (response && response.routes) {
               const pageData = {
                 routes: response.routes,
-                timestamp: Date.now(),
               };
 
-              localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+              setCachedPageData("routes", pageData);
 
               const destinationIds = extractDestinations(origin, silent, response, false);
                if(destinationIds) {
@@ -71,7 +85,7 @@ async function fetchDestinations(origin, silent = false) {
         );
       } else {
         chrome.tabs.create({
-          url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
+          url: wizzair_aycf_page,
         });
         reject(
           new Error(
@@ -84,16 +98,12 @@ async function fetchDestinations(origin, silent = false) {
 }
 
 async function getDynamicUrl() {
-  const pageData = localStorage.getItem("wizz_page_data");
-  if (pageData) {
-    const data = JSON.parse(pageData);
-    const oneHourInMs = 60 * 60 * 1000;
-    if (Date.now() - data.timestamp < oneHourInMs && data.dynamicUrl) {
-      console.log("Using cached dynamic URL");
-      return data.dynamicUrl;
-    }
+  const pageData = getCachedPageData("dynamicUrl");
+  if (pageData && pageData.dynamicUrl) {
+    return pageData.dynamicUrl;
   }
 
+  console.log("Retrieving tab dynamic URL");
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const currentTab = tabs[0];
@@ -102,19 +112,64 @@ async function getDynamicUrl() {
         { action: "getDynamicUrl" },
         function (response) {
           if (chrome.runtime.lastError) {
-            reject(chrome.runtime.lastError);
-          } else if (response && response.dynamicUrl) {
-            const pageData = JSON.parse(
-              localStorage.getItem("wizz_page_data") || "{}"
-            );
-            pageData.dynamicUrl = response.dynamicUrl;
-            pageData.timestamp = Date.now();
-            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+            if(chrome.runtime.lastError.message == "Could not establish connection. Receiving end does not exist.") {
+              console.log(chrome.runtime.lastError.message);
+              reject({message: "Refresh page " + wizzair_aycf_page + " and log in if prompted"});
+            } else {
+              reject(chrome.runtime.lastError);
+            }
+          }
+
+          if (response && response.dynamicUrl) {
+            const pageData = {
+              dynamicUrl: response.dynamicUrl,
+            }
+            setCachedPageData("dynamicUrl", pageData);
             resolve(response.dynamicUrl);
           } else if (response && response.error) {
             reject(new Error(response.error));
           } else {
             reject(new Error("Failed to get dynamic URL"));
+          }
+        }
+      );
+    });
+  });
+}
+
+async function getHeaders() {
+  const pageData = getCachedPageData("headers");
+  if (pageData && pageData.headers) {
+    return pageData.headers;
+  }
+
+  console.log("Retrieving tab headers");
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      const currentTab = tabs[0];
+      chrome.tabs.sendMessage(
+        currentTab.id,
+        { action: "getHeaders" },
+        function (response) {
+          if (chrome.runtime.lastError) {
+            if(chrome.runtime.lastError.message == "Could not establish connection. Receiving end does not exist.") {
+                console.log(chrome.runtime.lastError.message);
+                reject({message: "Refresh page " + wizzair_aycf_page + " and log in if prompted"});
+            } else {
+              reject(chrome.runtime.lastError);
+            }
+          }
+
+          if (response && response.headers) {
+            const pageData = {
+              headers: response.headers,
+            }
+            setCachedPageData("headers", pageData);
+            resolve(response.headers);
+          } else if (response && response.error) {
+            reject(new Error(response.error));
+          } else {
+            reject(new Error("Failed to get headers"));
           }
         }
       );
@@ -136,7 +191,6 @@ async function checkRoute(origin, destination, date, forceRefresh) {
     await new Promise((resolve) => setTimeout(resolve, delay));
 
     const dynamicUrl = await getDynamicUrl();
-    const pageData = JSON.parse(localStorage.getItem("wizz_page_data") || "{}");
 
     const data = {
       flightType: "OW",
@@ -150,25 +204,8 @@ async function checkRoute(origin, destination, date, forceRefresh) {
     let headers = {
       'Content-Type': 'application/json',
     };
-
-    const oneHourInMs = 60 * 60 * 1000;
-    if (pageData.headers && Date.now() - pageData.timestamp < oneHourInMs) {
-      console.log("Using cached headers");
-      headers = { ...headers, ...pageData.headers };
-    } else {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const response = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(tab.id, { action: "getHeaders" }, resolve);
-      });
-      if (response && response.headers) {
-        headers = { ...headers, ...response.headers };
-      } else {
-        console.log("Failed to get headers from the page, using defaults");
-      }
-    }
+    const responseHeaders = await getHeaders();
+    headers = { ...headers, ...responseHeaders };
 
     const fetchResponse = await fetch(dynamicUrl, {
       method: "POST",
@@ -182,6 +219,19 @@ async function checkRoute(origin, destination, date, forceRefresh) {
     }
 
     const responseData = await fetchResponse.json();
+
+    // Code 400: Flight not available
+    if (fetchResponse.status == 400) {
+      if (responseData.message == 'error.availability') {
+        console.log("Flight not available. Received code '" + responseData.code +  "'; responseData=" + JSON.stringify(responseData));
+        const noFlightsOutbound = [];
+        setCachedResults(cacheKey, noFlightsOutbound);
+        return noFlightsOutbound;
+      } else {
+        throw new Error(`HTTP error! status: ${fetchResponse.status}, error: ${fetchResponse.error()}`);
+      }
+    }
+
     const flightsOutbound = responseData.flightsOutbound || [];
     setCachedResults(cacheKey, flightsOutbound);
 
@@ -219,20 +269,28 @@ function getCachedResultsKeys() {
   );
 }
 
-function setCachedResults(cacheKey, results) {
+function setCachedData(cacheKey, data) {
   const cacheData = {
-    results: results,
+    data: data,
     timestamp: Date.now(),
   };
   localStorage.setItem(cacheKey, JSON.stringify(cacheData));
 }
 
-function getCachedData(cacheKey) {
+function setCachedPageData(type, pageData) {
+  setCachedData(type, pageData);
+}
+
+function setCachedResults(cacheKey, results) {
+  setCachedData(cacheKey, results);
+}
+
+function getCachedData(cacheKey, validForHours) {
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) {
-    const { results, timestamp } = JSON.parse(cachedData);
-    const eightHoursInMs = 8 * 60 * 60 * 1000;
-    if (Date.now() - timestamp < eightHoursInMs) {
+    const { data, timestamp } = JSON.parse(cachedData);
+    const validHoursInMs = validForHours * 60 * 60 * 1000;
+    if (Date.now() - timestamp < validHoursInMs) {
       return cachedData;
     } else {
       removeCachedResults(cacheKey, true);
@@ -241,19 +299,28 @@ function getCachedData(cacheKey) {
   return null;
 }
 
-function getCachedResults(cacheKey) {
-  const cachedData = getCachedData(cacheKey);
+function getCachedPageData(type) {
+  const cachedData = getCachedData(type, pageValidForHours);
   if (cachedData) {
-    const { results, timestamp } = JSON.parse(cachedData);
-    return results;
+    const { data, timestamp } = JSON.parse(cachedData);
+    return data;
+  }
+  return null;
+}
+
+function getCachedResults(cacheKey) {
+  const cachedData = getCachedData(cacheKey, resultsValidForHours);
+  if (cachedData) {
+    const { data, timestamp } = JSON.parse(cachedData);
+    return data;
   }
   return null;
 }
 
 function getCachedTimestamp(cacheKey) {
-  const cachedData = getCachedData(cacheKey);
+  const cachedData = getCachedData(cacheKey, resultsValidForHours);
   if (cachedData) {
-    const { results, timestamp } = JSON.parse(cachedData);
+    const { data, timestamp } = JSON.parse(cachedData);
     return timestamp;
   }
   return null;
@@ -1190,7 +1257,7 @@ function showCachedResults() {
 
     const clearButton = document.createElement("clearButton");
     clearButton.style.marginTop = "5px";
-    clearButton.textContent = `Clear`;
+    clearButton.textContent = "Remove";
     clearButton.classList.add("button", "is-small", "is-danger", "is-light");
     clearButton.addEventListener("click", () => clearCachedResult(cacheKey, showButton, clearButton));
     detailsDiv.appendChild(clearButton);
@@ -1238,21 +1305,14 @@ function clearCachedResult(cacheKey, showButton, clearButton) {
 }
 
 function checkCacheValidity() {
-  const cacheKeys = getCachedResultsKeys();
+  getCachedPageData("routes");
+  getCachedPageData("dynamicUrl");
+  getCachedPageData("headers");
 
+  const cacheKeys = getCachedResultsKeys();
   cacheKeys.forEach((cacheKey) => {
     getCachedResults(cacheKey);
   });
-}
-
-function isPageDataValid() {
-  const pageData = localStorage.getItem("wizz_page_data");
-  if (pageData) {
-    const data = JSON.parse(pageData);
-    const eightHoursInMs = 8 * 60 * 60 * 1000;
-    return Date.now() - data.timestamp < eightHoursInMs;
-  }
-  return false;
 }
 
 function populateLastUsedInput(fieldId, cacheProperty) {
@@ -1329,10 +1389,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   displayCacheButton();
-
-  if (!isPageDataValid()) {
-    localStorage.removeItem("wizz_page_data");
-  }
 });
 
 document.addEventListener("DOMContentLoaded", function () {
