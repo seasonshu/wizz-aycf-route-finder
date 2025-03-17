@@ -576,12 +576,12 @@ async function findNextAirports(hopRequest, control) {
 
   if(hopRequest.maxHops == 1 || hopRequest.hopsLeft > 1) {
     if(control.itinerary.via.includes("ANY")) {
-      nextAirports.push(...destinations);
+      nextAirports.push(...destinations.filter(item => item != hopRequest.arrival));
     } else {
       nextAirports.push(...destinations.filter(item =>
         (! hopRequest.arrival && hopRequest.maxHops == 1)
         ||
-        (hopRequest.arrival && control.itinerary.via.includes(item)))
+        (hopRequest.arrival && item != hopRequest.arrival && control.itinerary.via.includes(item)))
       );
     }
   }
