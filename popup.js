@@ -1,5 +1,7 @@
 console.log("popup.js loaded");
 
+// one of 'en-US', 'en-GB', etc..
+const locale=Intl.NumberFormat().resolvedOptions().locale;
 const maxHops=3;
 const minLayerOver=3;
 const futureDays=3;
@@ -342,18 +344,22 @@ function dateTimeToISOString(dateTime) {
 }
 
 // UTC offset was added instead of subtracted when creating the ISO time..
-function fixUTCDateTime(dateTime, offsetText) {
+function extractTimeZone(offsetText) {
   if(offsetText == "UTC") {
-    return dateTime;
+    return 0;
   }
 
-  const tzDiff = offsetText.toString().substring(3);
+  return parseInt(offsetText.toString().substring(3));
+}
+
+function fixUTCDateTime(dateTime, offsetText) {
+  tzOffset = extractTimeZone(offsetText);
   const dateTimeIso = new Date(dateTime.toString());
-  dateTimeIso.setHours(dateTimeIso.getHours() - parseInt(tzDiff)*2);
+  dateTimeIso.setHours(dateTimeIso.getHours() - tzOffset*2);
   return dateTimeToISOString(dateTimeIso);
 }
 
-function calculateDuration(dateObj1, dateObj2, format) {
+function calculateDuration(dateObj1, dateObj2) {
   const _MS_PER_DAY = 1000 * 60 * 60 * 24;
   const _MS_PER_HOUR = 1000 * 60 * 60;
   const _MS_PER_MIN = 1000 * 60;
@@ -366,23 +372,49 @@ function calculateDuration(dateObj1, dateObj2, format) {
   const hours   = Math.floor((diffMin % (60 * 24)) / (60));
   const minutes = (diffMin % 60);
 
-  let text=null;
-  switch(format) {
-    case "HM":
-      return hours.toString().padStart(2, "0") + "h " + (minutes != 0 ? minutes.toString().padStart(2, "0") + "m" : "");
-    case "DH":
-      return (days != 0 ? days.toString().padStart(1, "0") + "d " : "") + hours.toString().padStart(2, "0") + "h ";
-    case "DHM":
-      return (days != 0 ? days.toString().padStart(1, "0") + "d " : "") + hours.toString().padStart(2, "0") + "h " + (minutes != 0 ? minutes.toString().padStart(2, "0") + "m" : "");
-    default:
-      return null;
-  }
+  return new Intl.DurationFormat(locale, { style: "narrow" }).format(
+    {
+      days: days,
+      hours: hours,
+      minutes: minutes,
+    }
+  );
 }
 
 function incrementDate(dateObj, increment) {
   let date = new Date(dateObj.toString());
   let increasedDate = new Date(date.getTime() + (increment * 24*60*60*1000));
   return increasedDate;
+}
+
+function formatDateLong(date) {
+  return new Date(date).toLocaleDateString(locale, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function formatDateShort(date) {
+  return new Date(date).toLocaleDateString(locale, {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatTime(dateTime, offsetText) {
+  if(dateTime.length < 12) {
+    // Assuming it only contains time, e.g. '03:53:51.123'
+    // Prefix with any date so it can be parsed
+    dateTime = '0000-01-01 ' + dateTime;
+  }
+
+  tzOffset = extractTimeZone(offsetText);
+  const dateTimeIso = new Date(dateTime.toString());
+  dateTimeIso.setHours(dateTimeIso.getHours() + tzOffset);
+  return dateTimeIso.toLocaleTimeString(locale, { timeStyle: "short"} );
 }
 
 function makeFlightName(origin, arrival, via) {
@@ -426,7 +458,8 @@ async function checkHop(params, control) {
     }
 
     const updateProgress = () => {
-      control.progressElement.textContent = `Checking ${params.origin} to ${params.destination}... ${control.completedRoutes}/${control.destinationCnt} on ${params.date}`;
+      const dateFormatted = formatDateShort(params.date);
+      control.progressElement.textContent = `Checking ${params.origin} to ${params.destination} on ${dateFormatted}... ${control.completedRoutes}/${control.destinationCnt}`;
     };
 
     const flights = await checkRoute(params.origin, params.destination, params.date, control.itinerary.forceRefresh);
@@ -435,7 +468,7 @@ async function checkHop(params, control) {
         // Touch upon sloppy data returned by server
         const departureDateTimeUTC = fixUTCDateTime(flight.departureDateTimeIso, flight.departureOffsetText);
         const arrivalDateTimeUTC = fixUTCDateTime(flight.arrivalDateTimeIso, flight.arrivalOffsetText);
-        let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC, "DHM");
+        let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC);
         // Calculate earliest next departure date and time
         const layerOverDateTimeIso = new Date(arrivalDateTimeUTC /*flight.arrivalDateTimeIso*/);
         layerOverDateTimeIso.setHours(layerOverDateTimeIso.getHours() + minLayerOver);
@@ -463,19 +496,17 @@ async function checkHop(params, control) {
         let layoverDuration = null;
         if(params.flightHopsPrev.length > 0) {
           if(params.flightHopsPrev[0].date != params.date) {
-            flightDepartureDateText = " on " +
-            new Date(params.date).toLocaleDateString("en-US", {
-              weekday: "short",
-              day: "numeric",
-              month: "short"
-            });
+            flightDepartureDateText = " on " + formatDateShort(params.date);
           }
 
-          layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[0].arrivalDateTimeUTC, departureDateTimeUTC, "DHM") + " ---";
+          layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[0].arrivalDateTimeUTC, departureDateTimeUTC) + " ---";
         }
 
         nextDepartureDate = dateToISOString(new Date(Date.parse(flight.arrivalDate)));
         const daysLeft = (params.date == nextDepartureDate) ? params.daysLeft : params.daysLeft - 1;
+
+        const departureFormatted = formatTime(departureDateTimeUTC, flight.departureOffsetText);
+        const arrivalFormatted = formatTime(arrivalDateTimeUTC, flight.arrivalOffsetText);
 
         const flightInfo = {
           origin: params.origin,
@@ -487,8 +518,8 @@ async function checkHop(params, control) {
           arrivalDateTimeUTC: arrivalDateTimeUTC,
           route: `${params.origin} (${flight.departureStationText}) to ${params.destination} (${flight.arrivalStationText}) - ${flight.flightCode} ${flightDepartureDateText}`,
           date: params.date,
-          departure: `${flight.departure} (${flight.departureOffsetText})`,
-          arrival: `${flight.arrival} (${flight.arrivalOffsetText})`,
+          departure: `${departureFormatted} (${flight.departureOffsetText})`,
+          arrival: `${arrivalFormatted} (${flight.arrivalOffsetText})`,
           duration: duration,
           layoverDuration: layoverDuration,
         };
@@ -503,7 +534,7 @@ async function checkHop(params, control) {
         } else {
           const routeText = `${flightHops[0].origin} (${flightHops[0].departureStationText}) to ${flightHops[flightHops.length - 1].destination} (${flightHops[flightHops.length - 1].arrivalStationText})`;
           const stopsText = flightHops.length == 1 ? "Direct" : (flightHops.length - 1) + " stop" + ((flightHops.length - 1) > 1 ? "s" : "");
-          const outDuration = calculateDuration(flightHops[0].departureDateTimeUTC, flightHops[flightHops.length - 1].arrivalDateTimeUTC, "DHM");
+          const outDuration = calculateDuration(flightHops[0].departureDateTimeUTC, flightHops[flightHops.length - 1].arrivalDateTimeUTC);
 
           const oneWay = {
             route: routeText,
@@ -524,7 +555,7 @@ async function checkHop(params, control) {
           const itinerary = JSON.parse(JSON.stringify(control.itinerary));
           itinerary[control.direction] = oneWay;
           if(control.direction == "ret") {
-            itinerary.timeAtDestination = calculateDuration(control.outArrivalDateTimeUTC, itinerary[control.direction].departureDateTimeUTC, "DHM");
+            itinerary.timeAtDestination = calculateDuration(control.outArrivalDateTimeUTC, itinerary[control.direction].departureDateTimeUTC);
           }
 
           control.flightsByDate[flightHops[0].date].push(itinerary);
@@ -788,12 +819,7 @@ function displayResultsHeaderDate(resultsDiv, date, flags = {}, direction = "out
         resultsDiv.appendChild(dateHeader);
 
         const dateText = document.createElement("span");
-        dateText.textContent = new Date(date).toLocaleDateString("en-US", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        }) + ((direction == "ret") ? ": " + direction.toUpperCase() : "");
+        dateText.textContent = formatDateLong(date) + ((direction == "ret") ? ": " + direction.toUpperCase() : "");
         dateHeader.appendChild(dateText);
 
         if(direction == "out") {
@@ -1121,7 +1147,8 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
 
   for (const returnDate of returnDates) {
     if(enableItineraryCache) {
-      console.log(`Checking return flights for ${returnDate}`);
+      const returnDateFormatted = formatDateShort(returnDate);
+      console.log(`Checking return flights for ${returnDateFormatted}`);
     }
 
     control.destinationCnt = control.destinationCnt - 1;
@@ -1129,7 +1156,9 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     try {
       await checkItineraries(origin, arrival, returnDate, control);
     } catch (error) {
-      console.error(`Error checking return flight for ${returnDate}:`, error);
+      console.error("Error in findReturnFlight checking return flight for ${returnDate}:", error);
+      const routeListElement = document.querySelector(".route-list");
+      routeListElement.innerHTML = `<p>Error: ${error.message}</p>`;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -1401,11 +1430,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const option = document.createElement("option");
     option.value = date.toISOString().split("T")[0];
-    option.textContent = date.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-    });
+    option.textContent = formatDateShort(date);
 
     dateSelect.appendChild(option);
   }
