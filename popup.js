@@ -18,6 +18,8 @@ const resultsValidForHours=8;
 // CONST
 const wizzair_aycf_page="https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 
+// INTERNAL
+let runningSearchAllowed;
 
 function extractDestinations(origin, silent, data, isCached) {
   const routesFromOrigin = data.routes.find(
@@ -436,6 +438,10 @@ function makeHopInput(origin, destination, arrival, date, earliestDepartureDateT
 }
 
 async function checkHop(params, control) {
+  if(! runningSearchAllowed) {
+    return;
+  }
+
   if(enableItineraryCache) {
     console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
   }
@@ -687,6 +693,32 @@ function displayCachedHeader(cacheKey, cachedResults) {
   );
 }
 
+function createProgressFrame(progressElement) {
+  const progressContainer = document.createElement("div");
+
+  const progressElementContainer = document.createElement("div");
+  progressElementContainer.style.display = "flex";
+  progressElementContainer.style.justifyContent = "space-between";
+  progressElementContainer.style.alignItems = "center";
+  progressElementContainer.style.marginBottom = "4px";
+  progressContainer.appendChild(progressElementContainer);
+
+  progressElementContainer.appendChild(progressElement);
+
+  const cancelButtonContainer = document.createElement("div");
+  progressContainer.appendChild(cancelButtonContainer);
+
+  const cancelButton = document.createElement("button");
+  cancelButton.textContent = "Cancel";
+  cancelButton.classList.add("button", "is-small", "is-danger", "is-light");
+  cancelButton.addEventListener("click", cancelSearch);
+  cancelButtonContainer.appendChild(cancelButton);
+
+  runningSearchAllowed = true;
+
+  return progressContainer;
+}
+
 async function checkAllRoutes() {
   console.log("checkAllRoutes started");
 
@@ -767,11 +799,12 @@ async function checkAllRoutes() {
 
     control.progressElement.id = "progress";
     control.progressElement.style.marginBottom = "10px";
-    routeListElement.insertBefore(control.progressElement, routeListElement.firstChild);
+    const progressContainer = createProgressFrame(control.progressElement);
+    routeListElement.insertBefore(progressContainer, routeListElement.firstChild);
 
     await checkItineraries(origin, arrival, date, control);
 
-    control.progressElement.remove();
+    progressContainer.remove();
 
     if (! control.isRateLimited) {
       if (! control.flightsByDate[date] || control.flightsByDate[date].length == 0) {
@@ -1126,7 +1159,8 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
   progressElement.style.marginTop = "10px";
   progressElement.style.fontSize = "0.9em";
   progressElement.style.color = "#000";
-  outItineraryLI.appendChild(progressElement);
+  const progressContainer = createProgressFrame(progressElement);
+  outItineraryLI.appendChild(progressContainer);
 
   const control = {
     progressElement : progressElement,
@@ -1178,7 +1212,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     });
 
   setCachedResults(outboundItinerary.cacheKey, cachedResults);
-  progressElement.remove();
+  progressContainer.remove();
 
   await displayResults(outboundItinerary["ret"].flights, "ret", /*flags*/ {append: false, dateToAppend: null, outItineraryLI: outItineraryLI});
 }
@@ -1204,6 +1238,10 @@ function displayCacheButton() {
   cacheButton.addEventListener("click", showCachedResults);
 }
 
+function cancelSearch() {
+  runningSearchAllowed = false;
+}
+
 function showCachedResults() {
   const cacheKeys = getCachedResultsItineraryKeys();
 
@@ -1215,6 +1253,7 @@ function showCachedResults() {
   headerContainer.style.justifyContent = "space-between";
   headerContainer.style.alignItems = "center";
   headerContainer.style.marginBottom = "4px";
+  resultsDiv.appendChild(headerContainer);
 
   if (cacheKeys.length !== 0) {
     const header = document.createElement("h2");
@@ -1226,8 +1265,6 @@ function showCachedResults() {
     clearAllButton.addEventListener("click", clearAllCachedResults);
     headerContainer.appendChild(clearAllButton);
   }
-
-  resultsDiv.appendChild(headerContainer);
 
   if (cacheKeys.length === 0) {
     const noResultsMessage = document.createElement("p");
