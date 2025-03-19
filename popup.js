@@ -303,8 +303,8 @@ function getCachedData(cacheKey, validForHours) {
   return null;
 }
 
-function getCachedPageData(type) {
-  const cachedData = getCachedData(type, pageValidForHours);
+function getCachedPageData(type, validForHours = pageValidForHours) {
+  const cachedData = getCachedData(type, validForHours);
   if (cachedData) {
     const { data, timestamp } = JSON.parse(cachedData);
     return data;
@@ -312,8 +312,8 @@ function getCachedPageData(type) {
   return null;
 }
 
-function getCachedResults(cacheKey) {
-  const cachedData = getCachedData(cacheKey, resultsValidForHours);
+function getCachedResults(cacheKey, validForHours = resultsValidForHours) {
+  const cachedData = getCachedData(cacheKey, validForHours);
   if (cachedData) {
     const { data, timestamp } = JSON.parse(cachedData);
     return data;
@@ -1238,6 +1238,13 @@ function displayCacheButton() {
   cacheButton.addEventListener("click", showCachedResults);
 }
 
+function displayClearPageCacheButton() {
+  const clearPageCacheButton = document.getElementById("clear-page-cache");
+  if (clearPageCacheButton) {
+    clearPageCacheButton.addEventListener("click", clearPageCache);
+  }
+}
+
 function cancelSearch() {
   runningSearchAllowed = false;
 }
@@ -1381,6 +1388,13 @@ function checkCacheValidity() {
   });
 }
 
+function clearPageCache() {
+console.log("Called clearPageCache");
+  getCachedPageData("routes", 0);
+  getCachedPageData("dynamicUrl", 0);
+  getCachedPageData("headers", 0);
+}
+
 function populateLastUsedInput(fieldId, cacheProperty) {
   const inputElement = document.getElementById(fieldId);
   const cacheValue = localStorage.getItem(cacheProperty);
@@ -1455,6 +1469,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   displayCacheButton();
+  displayClearPageCacheButton();
 });
 
 document.addEventListener("DOMContentLoaded", function () {
