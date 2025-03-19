@@ -186,11 +186,12 @@ async function getHeaders() {
 
 async function checkRoute(origin, destination, date, forceRefresh) {
   const cacheKey = makeCacheRouteKey(origin, destination, date);
-  const cachedResults = getCachedResults(cacheKey);
+  const cachedData = getCachedData(cacheKey);
 
-  if (! forceRefresh && cachedResults) {
+  if (! forceRefresh && cachedData) {
+    const { data, timestamp } = JSON.parse(cachedData);
     console.log("checkRoute: Using cached results for origin=", origin, ", destination=", destination, ", date=", date);
-    return cachedResults;
+    return { flights: data, timestamp };
   }
 
   try {
@@ -233,7 +234,7 @@ async function checkRoute(origin, destination, date, forceRefresh) {
         console.log("Flight not available. Received code '" + responseData.code +  "'; responseData=" + JSON.stringify(responseData));
         const noFlightsOutbound = [];
         setCachedResults(cacheKey, noFlightsOutbound);
-        return noFlightsOutbound;
+        return { flights: noFlightsOutbound, timestamp: null };
       } else {
         throw new Error(`HTTP error! status: ${fetchResponse.status}, error: ${fetchResponse.error()}`);
       }
@@ -242,7 +243,7 @@ async function checkRoute(origin, destination, date, forceRefresh) {
     const flightsOutbound = responseData.flightsOutbound || [];
     setCachedResults(cacheKey, flightsOutbound);
 
-    return flightsOutbound;
+    return { flights: flightsOutbound, timestamp: null };
   } catch (error) {
     console.error("Error in checkRoute:", error);
     if (
@@ -292,7 +293,7 @@ function setCachedResults(cacheKey, results) {
   setCachedData(cacheKey, results);
 }
 
-function getCachedData(cacheKey, validForHours) {
+function getCachedData(cacheKey, validForHours = resultsValidForHours) {
   const cachedData = localStorage.getItem(cacheKey);
   if (cachedData) {
     const { data, timestamp } = JSON.parse(cachedData);
@@ -461,7 +462,7 @@ async function checkHop(params, control) {
       return;
     }
 
-    if (control.completedRoutes > 0 && control.completedRoutes % 25 === 0) {
+    if (control.checkedRoutes > 0 && control.checkedRoutes % 25 === 0) {
       control.progressElement.textContent = `Taking a 15 second break to avoid rate limiting...`;
       await new Promise((resolve) => setTimeout(resolve, 15000));
     }
@@ -471,8 +472,15 @@ async function checkHop(params, control) {
       control.progressElement.textContent = `Checking ${params.origin} to ${params.destination} on ${dateFormatted}... ${control.completedRoutes}/${control.destinationCnt}`;
     };
 
-    const flights = await checkRoute(params.origin, params.destination, params.date, control.itinerary.forceRefresh);
-    if (flights && flights.length > 0) {
+    const { flights, timestamp } = await checkRoute(params.origin, params.destination, params.date, control.itinerary.forceRefresh);
+    if (! flights || flights.length == 0) {
+      if(debugItinerarySearch) {
+        console.log("checkHop no flights were found for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
+      }
+    } else {
+      if(debugItinerarySearch) {
+        console.log("checkHop processing", flights.length, "flights for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
+      }
       flights.forEach((flight) => {
         // Touch upon sloppy data returned by server
         const departureDateTimeUTC = fixUTCDateTime(flight.departureDateTimeIso, flight.departureOffsetText);
@@ -496,7 +504,7 @@ async function checkHop(params, control) {
 
         if(params.earliestDepartureDateTimeUTC && departureDateTimeUTC < params.earliestDepartureDateTimeUTC) {
           if(debugItinerarySearch) {
-            console.log("Cannot make transfer, dropping flight");
+            console.log("Cannot make transfer, dropping. Flight departureDateTimeUTC=", departureDateTimeUTC, ", earliestDepartureDateTimeUTC=", params.earliestDepartureDateTimeUTC);
           }
           return;
         }
@@ -579,6 +587,9 @@ async function checkHop(params, control) {
     }
 
     control.completedRoutes++;
+    if(! timestamp) {
+      control.checkedRoutes++;
+    }
     updateProgress();
     await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -586,7 +597,7 @@ async function checkHop(params, control) {
       // Could not find a suitable transfer for this day, try again for tomorrow
       if(params.daysLeft > 0) {
         if(debugItinerarySearch) {
-          console.log("Retrying for the next day: " + dateToISOString(incrementDate(params.date, 1)) + " from origin" + params.origin);
+          console.log("Retrying for the next day: " + dateToISOString(incrementDate(params.date, 1)) + " from origin " + params.origin);
         }
         const nextParams = makeHopInput(params.origin, params.destination, params.arrival, dateToISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
         nextFlightLegInputs.push(nextParams);
@@ -855,7 +866,7 @@ async function checkAllRoutes() {
   const dateSelect = document.getElementById("date-select");
   const origin = originInput.value.toUpperCase();
   const arrival = arrivalInput.value.toUpperCase();
-  const via = viaInput.value.toUpperCase().split(',').filter(item => item != "");
+  const via = viaInput.value.toUpperCase().split(',').map(e => e.trim()).filter(e => e != "");
   const date = dateSelect.value;
   const futureDaysOffset = dateSelect.selectedIndex;
 
@@ -903,6 +914,7 @@ async function checkAllRoutes() {
     const control = {
       progressElement : document.createElement("div"),
       flightsByDate : {},
+      checkedRoutes: 0,
       completedRoutes: 0,
       isRateLimited : false,
       destinationCnt : 0,
@@ -1286,6 +1298,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
   const control = {
     progressElement : progressElement,
     flightsByDate : {},
+    checkedRoutes: 0,
     completedRoutes: 0,
     isRateLimited : false,
     destinationCnt : returnDates.length,
