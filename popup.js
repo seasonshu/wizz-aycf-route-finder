@@ -1156,6 +1156,10 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
         detailsDiv.style.justifyContent = "space-between";
         itineraryItem.appendChild(detailsDiv);
 
+        const durationDiv = document.createElement("div");
+        detailsDiv.appendChild(durationDiv);
+        durationDiv.textContent = `⏱️ ${itinerary[direction].duration}`;
+
         const departureDiv = document.createElement("div");
         detailsDiv.appendChild(departureDiv);
         departureDiv.textContent = `✈️ ${itinerary[direction].departure}`;
@@ -1163,10 +1167,6 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
         const arrivalDiv = document.createElement("div");
         detailsDiv.appendChild(arrivalDiv);
         arrivalDiv.textContent = `🛬 ${itinerary[direction].arrival}`;
-
-        const durationDiv = document.createElement("div");
-        detailsDiv.appendChild(durationDiv);
-        durationDiv.textContent = `⏱️ ${itinerary[direction].duration}`;
       }
 
       if (direction == "ret") {
