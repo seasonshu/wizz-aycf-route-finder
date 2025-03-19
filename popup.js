@@ -7,10 +7,13 @@ const minLayerOver=3;
 const futureDays=3;
 
 // DEBUG
+const debugItineraryRoutes=false;
 const debugItinerarySearch=false;
+const debugItineraryDates=false;
 
 // CACHE
-// Even when itinerary cache is disabled, route (page) cache remains enabled
+// Disable enableItineraryCache when debugging search behaviour
+// Even when itinerary cache is disabled, route (page) cache remains enabled, avoiding repeated hits on the server
 const enableItineraryCache=true;
 const pageValidForHours=1;
 const resultsValidForHours=8;
@@ -29,7 +32,7 @@ function extractDestinations(origin, silent, data, isCached) {
     const destinationIds = routesFromOrigin.arrivalStations.map(
       (station) => station.id
     );
-    if(! silent && debugItinerarySearch) {
+    if(! silent && debugItineraryRoutes) {
       console.log(`Routes from ${origin}:`, destinationIds, (isCached ? ` (cached)` : ``));
     }
     return destinationIds;
@@ -442,7 +445,7 @@ async function checkHop(params, control) {
     return;
   }
 
-  if(enableItineraryCache) {
+  if(debugItinerarySearch) {
     console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
   }
 
@@ -476,11 +479,11 @@ async function checkHop(params, control) {
         const arrivalDateTimeUTC = fixUTCDateTime(flight.arrivalDateTimeIso, flight.arrivalOffsetText);
         let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC);
         // Calculate earliest next departure date and time
-        const layerOverDateTimeIso = new Date(arrivalDateTimeUTC /*flight.arrivalDateTimeIso*/);
-        layerOverDateTimeIso.setHours(layerOverDateTimeIso.getHours() + minLayerOver);
-        const nextEarliestDepartureDateTimeIso = dateTimeToISOString(layerOverDateTimeIso);
+        const layerOverDateTimeUTC = new Date(arrivalDateTimeUTC /*flight.arrivalDateTimeIso*/);
+        layerOverDateTimeUTC.setHours(layerOverDateTimeUTC.getHours() + minLayerOver);
+        const nextEarliestDepartureDateTimeUTC = dateTimeToISOString(layerOverDateTimeUTC);
 
-        if(debugItinerarySearch) {
+        if(debugItineraryDates) {
           console.log("Found flight=", flight);
           console.log("earliestDepartureDateTimeUTC=" + params.earliestDepartureDateTimeUTC);
 //          console.log("flight.departureDateTimeIso=", flight.departureDateTimeIso);
@@ -505,7 +508,7 @@ async function checkHop(params, control) {
             flightDepartureDateText = " on " + formatDateShort(params.date);
           }
 
-          layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[0].arrivalDateTimeUTC, departureDateTimeUTC) + " ---";
+          layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[params.flightHopsPrev.length - 1].arrivalDateTimeUTC, departureDateTimeUTC) + " ---";
         }
 
         nextDepartureDate = dateToISOString(new Date(Date.parse(flight.arrivalDate)));
@@ -514,7 +517,7 @@ async function checkHop(params, control) {
         const departureFormatted = formatTime(departureDateTimeUTC, flight.departureOffsetText);
         const arrivalFormatted = formatTime(arrivalDateTimeUTC, flight.arrivalOffsetText);
 
-        const flightInfo = {
+        const flightHop = {
           origin: params.origin,
           departureStationText: flight.departureStationText,
           destination: params.destination,
@@ -530,11 +533,11 @@ async function checkHop(params, control) {
           layoverDuration: layoverDuration,
         };
 
-        const flightHops = [...params.flightHopsPrev, flightInfo];
+        const flightHops = [...params.flightHopsPrev, flightHop];
 
         if(params.arrival && flight.arrivalStation != params.arrival) {
           if(params.hopsLeft > 1) {
-            const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeIso, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
+            const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeUTC, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
             nextFlightLegInputs.push(nextParams);
           }
         } else {
@@ -554,7 +557,7 @@ async function checkHop(params, control) {
             flights: flightHops,
             departureDateTimeUTC: flightHops[0].departureDateTimeUTC,
             arrivalDateTimeUTC: flightHops[flightHops.length - 1].arrivalDateTimeUTC,
-            earliestDepartureDateTimeIso: nextEarliestDepartureDateTimeIso,
+            earliestDepartureDateTimeUTC: nextEarliestDepartureDateTimeUTC,
             daysLeft: daysLeft,
           };
 
@@ -604,7 +607,7 @@ async function findNextAirports(hopRequest, control) {
   const destinations = await fetchDestinations(hopRequest.origin);
 
   if(hopRequest.arrival && ! destinations.includes(hopRequest.arrival) && control.itinerary.via.length == 0) {
-    throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search.");
+    throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search");
   }
 
   if(hopRequest.arrival && destinations.includes(hopRequest.arrival)) {
@@ -626,41 +629,151 @@ async function findNextAirports(hopRequest, control) {
   return nextAirports;
 }
 
-async function pushHopRequests(queue, hopRequest, control) {
+function cloneHopInputWithDestination(hopRequest, destination) {
+  return makeHopInput(hopRequest.origin, destination, hopRequest.arrival, hopRequest.date, hopRequest.earliestDepartureDateTimeUTC, hopRequest.flightHopsPrev, hopRequest.maxHops, hopRequest.hopsLeft, hopRequest.daysLeft);
+}
+
+async function pushHopRequest(queue, hopRequest, control) {
+  if(hopRequest.destination) {
+    queue.push(cloneHopInputWithDestination(hopRequest, hopRequest.destination));
+    return;
+  }
+
   const nextAirports=await findNextAirports(hopRequest, control);
   if(nextAirports.length == 0) {
-    console.log("Unable to determine next hops from origin ", hopRequest.origin);
+    if(debugItineraryRoutes) {
+      console.log("Unable to determine next hops from origin ", hopRequest.origin);
+    }
     return;
   }
 
   const hopRequests = [];
   for (const destination of nextAirports) {
-    hopRequests.push(makeHopInput(hopRequest.origin, destination, hopRequest.arrival, hopRequest.date, hopRequest.earliestDepartureDateTimeUTC, hopRequest.flightHopsPrev, hopRequest.maxHops, hopRequest.hopsLeft, hopRequest.daysLeft));
+    hopRequests.push(cloneHopInputWithDestination(hopRequest, destination));
   }
   queue.push(...hopRequests);
-  control.destinationCnt += hopRequests.length;
 }
 
-async function checkItinerary(origin, destination, arrival, date, control) {
-  const queue = [];
-  const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? 2 : maxHops) : 1;
+async function pushHopRequests(queue, hopRequests, control) {
+  for (const hopRequest of hopRequests) {
+    await pushHopRequest(queue, hopRequest, control);
+  }
+}
+
+async function checkItinerary(itineraryPlan, date, hops, control) {
+  if(debugItinerarySearch) {
+    console.log("checkItinerary called with itineraryPlan=", itineraryPlan);
+  }
   const days = futureDays - control.futureDaysOffset;
-  await pushHopRequests(queue, makeHopInput(origin, destination, arrival, date, control.earliestReturnDepartureDateTimeUTC, [], hops, hops, days), control);
+  let queue = [];
+  let nextQueue = [];
 
-  // async function cannot call itself recursively
-  while(queue.length > 0) {
-    const job = queue.shift();
 
-    const nextFlightLegInputs = await checkHop(job, control);
-    if (nextFlightLegInputs) {
-      for (const nextFlightLegInput of nextFlightLegInputs) {
-        await pushHopRequests(queue, nextFlightLegInput, control);
+  let hopSequence = 0;
+  for (const hopPlan of itineraryPlan) {
+    queue = [];
+
+    // Add start of itinerary
+    if(hopSequence++ == 0) {
+      await pushHopRequest(nextQueue, makeHopInput(hopPlan.origin, hopPlan.destination, hopPlan.arrival, date, control.earliestReturnDepartureDateTimeUTC, [], hops, hops, days), control);
+    }
+
+    for (nextJob of nextQueue) {
+      // stick to planned route when finding routes to next airports
+      await pushHopRequest(queue, cloneHopInputWithDestination(nextJob, hopPlan.destination));
+    }
+    nextQueue = [];
+
+    if(queue.length == 0) {
+      // Unable to find all flights for this route, mark remaining hops as completed
+      control.completedRoutes++;
+    }
+
+    while(queue.length > 0) {
+      const job = queue.shift();
+
+      const nextFlightLegInputs = await checkHop(job, control);
+      if (nextFlightLegInputs) {
+        // Process all flights of the day
+        const hopRequests = [];
+        let hasNextDayCheck=false;
+        for(nextFlightLegInput of nextFlightLegInputs) {
+          if(nextFlightLegInput.origin == job.origin) {
+            hasNextDayCheck=true;
+            await pushHopRequest(queue, nextFlightLegInput, control);
+          } else {
+            nextQueue.push(nextFlightLegInput);
+          }
+        }
+        if(hasNextDayCheck) {
+          control.destinationCnt++;
+        }
+        queue.push(...hopRequests);
       }
     }
   }
 }
 
+async function discoverHop(params, control, discoveredItineraries) {
+  if(debugItineraryRoutes) {
+    console.log("discoverHop called for origin=", params.origin, ", destination=", params.destination);
+  }
+
+  const nextFlightLegInputs = [];
+
+  const flightHop = {
+    origin: params.origin,
+    destination: params.destination,
+    arrival: params.arrival,
+  };
+
+  const flightHops = [...params.flightHopsPrev, flightHop];
+
+  if(params.arrival && params.destination != params.arrival) {
+    // Verify we haven't been to this airport yet
+    for(flightHopPrev of params.flightHopsPrev) {
+      if(params.destination == flightHopPrev.origin || params.destination == flightHopPrev.destination) {
+        return;
+      }
+    }
+
+    if(params.hopsLeft > 1) {
+      const nextParams = makeHopInput(params.destination, /*destination*/ null, params.arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, flightHops, params.maxHops, params.hopsLeft-1, params.daysLeft);
+      nextFlightLegInputs.push(nextParams);
+    }
+  } else {
+    discoveredItineraries.push(flightHops);
+  }
+
+  return nextFlightLegInputs;
+}
+
+async function discoverItinerary(origin, arrival, date, hops, control) {
+  const queue = [];
+  const discoveredItineraries = [];
+
+  await pushHopRequest(queue, makeHopInput(origin, /*destination*/ null, arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, [], hops, hops, null), control);
+
+  // async function cannot call itself recursively
+  while(queue.length > 0) {
+    const job = queue.shift();
+
+    const nextFlightLegInputs = await discoverHop(job, control, discoveredItineraries);
+    if (nextFlightLegInputs) {
+      await pushHopRequests(queue, nextFlightLegInputs, control);
+    }
+  }
+
+  if(debugItinerarySearch) {
+    console.log("discovered itineraries=", discoveredItineraries);
+  }
+
+  return discoveredItineraries;
+}
+
 async function checkItineraries(origin, arrival, date, control) {
+  const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? 2 : maxHops) : 1;
+
   // Verify input
   await fetchDestinations(origin, true);
   for (const hop of control.itinerary.via) {
@@ -672,7 +785,15 @@ async function checkItineraries(origin, arrival, date, control) {
     await fetchDestinations(arrival, true);
   }
 
-  await checkItinerary(origin, /*destination*/ null, arrival, date, control);
+  const discoveredItineraries = await discoverItinerary(origin, arrival, date, hops, control);
+
+  for (const itineraryPlan of discoveredItineraries) {
+    control.destinationCnt += itineraryPlan.length;
+  }
+
+  for (const itineraryPlan of discoveredItineraries) {
+    await checkItinerary(itineraryPlan, date, hops, control);
+  }
 }
 
 function displayCachedHeader(cacheKey, cachedResults) {
@@ -1170,7 +1291,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     destinationCnt : returnDates.length,
     direction: "ret",
     outArrivalDateTimeUTC: outboundItinerary["out"].arrivalDateTimeUTC,
-    earliestReturnDepartureDateTimeUTC: outboundItinerary["out"].earliestDepartureDateTimeIso,
+    earliestReturnDepartureDateTimeUTC: outboundItinerary["out"].earliestDepartureDateTimeUTC,
     itinerary: {
       outItineraryLI: outItineraryLI,
       via: outboundItinerary.via,
@@ -1180,7 +1301,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
   }
 
   for (const returnDate of returnDates) {
-    if(enableItineraryCache) {
+    if(debugItinerarySearch) {
       const returnDateFormatted = formatDateShort(returnDate);
       console.log(`Checking return flights for ${returnDateFormatted}`);
     }
