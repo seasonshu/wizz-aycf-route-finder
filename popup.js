@@ -8,7 +8,7 @@ const futureDays=3;
 
 // DEBUG
 const debugItineraryRoutes=false;
-const debugItinerarySearch=false;
+const debugItinerarySearch=true;
 const debugItineraryDates=false;
 
 // CACHE
