@@ -184,14 +184,20 @@ async function getHeaders() {
   });
 }
 
-async function checkRoute(origin, destination, date, forceRefresh) {
+async function checkRoute(origin, destination, date, control) {
   const cacheKey = makeCacheRouteKey(origin, destination, date);
   const cachedData = getCachedData(cacheKey);
 
-  if (! forceRefresh && cachedData) {
+  if (cachedData) {
     const { data, timestamp } = JSON.parse(cachedData);
-    console.log("checkRoute: Using cached results for origin=", origin, ", destination=", destination, ", date=", date);
-    return { flights: data, timestamp };
+
+    if (  ! control.itinerary.forceRefresh
+        ||
+        (control.itinerary.forceRefresh && control.searchStarted <= timestamp)
+    ) {
+      console.log("checkRoute: Using cached results for origin=", origin, ", destination=", destination, ", date=", date);
+      return { flights: data, timestamp };
+    }
   }
 
   try {
@@ -472,7 +478,7 @@ async function checkHop(params, control) {
       control.progressElement.textContent = `Checking ${params.origin} to ${params.destination} on ${dateFormatted}... ${control.completedRoutes}/${control.destinationCnt}`;
     };
 
-    const { flights, timestamp } = await checkRoute(params.origin, params.destination, params.date, control.itinerary.forceRefresh);
+    const { flights, timestamp } = await checkRoute(params.origin, params.destination, params.date, control);
     if (! flights || flights.length == 0) {
       if(debugItinerarySearch) {
         console.log("checkHop no flights were found for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
@@ -912,6 +918,7 @@ async function checkAllRoutes() {
 
   try {
     const control = {
+      searchStarted : Date.now(),
       progressElement : document.createElement("div"),
       flightsByDate : {},
       checkedRoutes: 0,
@@ -1296,6 +1303,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
   outItineraryLI.appendChild(progressContainer);
 
   const control = {
+    searchStarted : Date.now(),
     progressElement : progressElement,
     flightsByDate : {},
     checkedRoutes: 0,
