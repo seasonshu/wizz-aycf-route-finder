@@ -41,7 +41,7 @@ function extractDestinations(origin, silent, data, isCached) {
   }
 }
 
-async function fetchDestinations(origin, silent = false) {
+async function fetchDestinations(origin, control, silent = false) {
   if(! origin) {
     throw new Error(`fetchDestinations: origin cannot be empty`);
   }
@@ -52,7 +52,13 @@ async function fetchDestinations(origin, silent = false) {
     return extractDestinations(origin, silent, pageData, true);
   }
 
-  console.log("Retrieving routes from multipass.wizzair.com");
+  const message = "Establishing connection: retrieving routes";
+  const updateProgress = () => {
+    control.progressElement.textContent = message;
+  };
+  updateProgress();
+
+  console.log(message);
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const currentTab = tabs[0];
@@ -104,13 +110,19 @@ async function fetchDestinations(origin, silent = false) {
   });
 }
 
-async function getDynamicUrl() {
+async function getDynamicUrl(control) {
   const pageData = getCachedPageData("dynamicUrl");
   if (pageData && pageData.dynamicUrl) {
     return pageData.dynamicUrl;
   }
 
-  console.log("Retrieving tab dynamic URL");
+  const message = "Establishing connection: getting dynamic URL";
+  const updateProgress = () => {
+    control.progressElement.textContent = message;
+  };
+  updateProgress();
+
+  console.log(message);
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const currentTab = tabs[0];
@@ -144,13 +156,19 @@ async function getDynamicUrl() {
   });
 }
 
-async function getHeaders() {
+async function getHeaders(control) {
   const pageData = getCachedPageData("headers");
   if (pageData && pageData.headers) {
     return pageData.headers;
   }
 
-  console.log("Retrieving tab headers");
+  const message = "Establishing connection: getting headers";
+  const updateProgress = () => {
+    control.progressElement.textContent = message;
+  };
+  updateProgress();
+
+  console.log(message);
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       const currentTab = tabs[0];
@@ -204,7 +222,7 @@ async function checkRoute(origin, destination, date, control) {
     const delay = Math.floor(Math.random() * (1000 - 500 + 1)) + 1000;
     await new Promise((resolve) => setTimeout(resolve, delay));
 
-    const dynamicUrl = await getDynamicUrl();
+    const dynamicUrl = await getDynamicUrl(control);
 
     const data = {
       flightType: "OW",
@@ -218,7 +236,7 @@ async function checkRoute(origin, destination, date, control) {
     let headers = {
       'Content-Type': 'application/json',
     };
-    const responseHeaders = await getHeaders();
+    const responseHeaders = await getHeaders(control);
     headers = { ...headers, ...responseHeaders };
 
     const fetchResponse = await fetch(dynamicUrl, {
@@ -621,7 +639,7 @@ async function checkHop(params, control) {
 
 async function findNextAirports(hopRequest, control) {
   let nextAirports=[];
-  const destinations = await fetchDestinations(hopRequest.origin);
+  const destinations = await fetchDestinations(hopRequest.origin, control);
 
   if(hopRequest.arrival && ! destinations.includes(hopRequest.arrival) && control.itinerary.via.length == 0) {
     throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search");
@@ -792,14 +810,14 @@ async function checkItineraries(origin, arrival, date, control) {
   const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? 2 : maxHops) : 1;
 
   // Verify input
-  await fetchDestinations(origin, true);
+  await fetchDestinations(origin, control, true);
   for (const hop of control.itinerary.via) {
     if(hop != "ANY") {
-      await fetchDestinations(hop, true);
+      await fetchDestinations(hop, control, true);
     }
   }
   if(arrival) {
-    await fetchDestinations(arrival, true);
+    await fetchDestinations(arrival, control, true);
   }
 
   const discoveredItineraries = await discoverItinerary(origin, arrival, date, hops, control);
