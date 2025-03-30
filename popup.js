@@ -3,7 +3,7 @@ console.log("popup.js loaded");
 // one of 'en-US', 'en-GB', etc..
 const locale=Intl.NumberFormat().resolvedOptions().locale;
 const maxHops=3;
-const minLayerOver=3;
+const minLayerOver=2;
 const futureDays=3;
 
 // DEBUG
