@@ -365,12 +365,16 @@ function removeCachedResults(cacheKey, setRefresh = false) {
   }
 }
 
-function dateToISOString(date) {
+function extractDateFromISOString(date) {
   return date.toISOString().substring(0, 10);
 }
 
-function dateTimeToISOString(dateTime) {
+function extractDateTimeFromISOString(dateTime) {
   return dateTime.toISOString().substring(0, 19).replace('T', ' ');
+}
+
+function dateTimeToISOString(dateTime) {
+  return dateTime.substring(0, 10) + 'T' + dateTime.substring(11, 19) + '.000Z';
 }
 
 // UTC offset was added instead of subtracted when creating the ISO time..
@@ -384,18 +388,18 @@ function extractTimeZone(offsetText) {
 
 function fixUTCDateTime(dateTime, offsetText) {
   tzOffset = extractTimeZone(offsetText);
-  const dateTimeIso = new Date(dateTime.toString());
+  const dateTimeIso = new Date(dateTimeToISOString(dateTime));
   dateTimeIso.setHours(dateTimeIso.getHours() - tzOffset*2);
-  return dateTimeToISOString(dateTimeIso);
+  return extractDateTimeFromISOString(dateTimeIso);
 }
 
-function calculateDuration(dateObj1, dateObj2) {
+function calculateDuration(dateTimeObj1, dateTimeObj2) {
   const _MS_PER_DAY = 1000 * 60 * 60 * 24;
   const _MS_PER_HOUR = 1000 * 60 * 60;
   const _MS_PER_MIN = 1000 * 60;
 
-  let date1 = new Date(dateObj1.toString());
-  let date2 = new Date(dateObj2.toString());
+  let date1 = new Date(dateTimeToISOString(dateTimeObj1));
+  let date2 = new Date(dateTimeToISOString(dateTimeObj2));
 
   const diffMin = (date2.getTime() - date1.getTime()) / (1000 * 60);
   const days    = Math.floor( diffMin / (60 * 24));
@@ -412,7 +416,7 @@ function calculateDuration(dateObj1, dateObj2) {
 }
 
 function incrementDate(dateObj, increment) {
-  let date = new Date(dateObj.toString());
+  let date = new Date(dateObj);
   let increasedDate = new Date(date.getTime() + (increment * 24*60*60*1000));
   return increasedDate;
 }
@@ -434,7 +438,14 @@ function formatDateShort(date) {
   });
 }
 
-function formatTime(dateTime, offsetText) {
+function convertDateTimeToLocalISODate(dateTime, offsetText) {
+  tzOffset = extractTimeZone(offsetText);
+  const dateTimeIso = new Date(dateTimeToISOString(dateTime));
+  dateTimeIso.setHours(dateTimeIso.getHours() + tzOffset);
+  return extractDateFromISOString(dateTimeIso);
+}
+
+function convertDateTimeToLocalRegionalTime(dateTime, offsetText) {
   if(dateTime.length < 12) {
     // Assuming it only contains time, e.g. '03:53:51.123'
     // Prefix with any date so it can be parsed
@@ -442,9 +453,11 @@ function formatTime(dateTime, offsetText) {
   }
 
   tzOffset = extractTimeZone(offsetText);
-  const dateTimeIso = new Date(dateTime.toString());
+  const dateTimeIso = new Date(dateTimeToISOString(dateTime));
   dateTimeIso.setHours(dateTimeIso.getHours() + tzOffset);
-  return dateTimeIso.toLocaleTimeString(locale, { timeStyle: "short"} );
+  // adjust to local timezone of the browser so we get time in regional format
+  var dateTimeLocal = new Date(dateTimeIso.getTime() + dateTimeIso.getTimezoneOffset() * 60 * 1000);
+  return dateTimeLocal.toLocaleTimeString(locale, { timeStyle: "short"} );
 }
 
 function makeFlightName(origin, arrival, via) {
@@ -511,9 +524,9 @@ async function checkHop(params, control) {
         const arrivalDateTimeUTC = fixUTCDateTime(flight.arrivalDateTimeIso, flight.arrivalOffsetText);
         let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC);
         // Calculate earliest next departure date and time
-        const layerOverDateTimeUTC = new Date(arrivalDateTimeUTC /*flight.arrivalDateTimeIso*/);
-        layerOverDateTimeUTC.setHours(layerOverDateTimeUTC.getHours() + minLayerOver);
-        const nextEarliestDepartureDateTimeUTC = dateTimeToISOString(layerOverDateTimeUTC);
+        const layoverDateTimeUTC = new Date(dateTimeToISOString(arrivalDateTimeUTC) /*flight.arrivalDateTimeIso*/);
+        layoverDateTimeUTC.setHours(layoverDateTimeUTC.getHours() + minLayerOver);
+        const nextEarliestDepartureDateTimeUTC = extractDateTimeFromISOString(layoverDateTimeUTC);
 
         if(debugItineraryDates) {
           console.log("Found flight=", flight);
@@ -524,6 +537,7 @@ async function checkHop(params, control) {
 //          console.log("flight.arrivalDateTimeIso=", flight.arrivalDateTimeIso);
 //          console.log("flight.arrivalOffsetText=", flight.arrivalOffsetText);
           console.log("arrivalDateTimeUTC=", arrivalDateTimeUTC);
+          console.log("nextEarliestDepartureDateTimeUTC=", nextEarliestDepartureDateTimeUTC);
         }
 
         if(params.earliestDepartureDateTimeUTC && departureDateTimeUTC < params.earliestDepartureDateTimeUTC) {
@@ -543,11 +557,11 @@ async function checkHop(params, control) {
           layoverDuration = "--- wait " + calculateDuration(params.flightHopsPrev[params.flightHopsPrev.length - 1].arrivalDateTimeUTC, departureDateTimeUTC) + " ---";
         }
 
-        nextDepartureDate = dateToISOString(new Date(Date.parse(flight.arrivalDate)));
+        nextDepartureDate = convertDateTimeToLocalISODate(nextEarliestDepartureDateTimeUTC, flight.arrivalOffsetText);
         const daysLeft = (params.date == nextDepartureDate) ? params.daysLeft : params.daysLeft - 1;
 
-        const departureFormatted = formatTime(departureDateTimeUTC, flight.departureOffsetText);
-        const arrivalFormatted = formatTime(arrivalDateTimeUTC, flight.arrivalOffsetText);
+        const departureFormatted = convertDateTimeToLocalRegionalTime(departureDateTimeUTC, flight.departureOffsetText);
+        const arrivalFormatted = convertDateTimeToLocalRegionalTime(arrivalDateTimeUTC, flight.arrivalOffsetText);
 
         const flightHop = {
           origin: params.origin,
@@ -621,9 +635,9 @@ async function checkHop(params, control) {
       // Could not find a suitable transfer for this day, try again for tomorrow
       if(params.daysLeft > 0) {
         if(debugItinerarySearch) {
-          console.log("Retrying for the next day: " + dateToISOString(incrementDate(params.date, 1)) + " from origin " + params.origin);
+          console.log("Retrying for the next day: " + extractDateFromISOString(incrementDate(params.date, 1)) + " from origin " + params.origin);
         }
-        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, dateToISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
+        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, extractDateFromISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
         nextFlightLegInputs.push(nextParams);
       }
     }
@@ -1309,7 +1323,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
   for (let i = 0; i <= outboundItinerary["out"].daysLeft; i++) {
     const date = new Date(outboundArrivalDate);
     date.setDate(date.getDate() + i);
-    returnDates.push(dateToISOString(date));
+    returnDates.push(extractDateFromISOString(date));
   }
 
   const progressElement = document.createElement("div");
