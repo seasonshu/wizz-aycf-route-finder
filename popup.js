@@ -853,7 +853,7 @@ function displayCachedHeader(cacheKey, cachedResults) {
   const routeListElement = document.querySelector(".route-list");
   const cacheNotification = document.createElement("div");
   cacheNotification.textContent =
-    `Using cached results. Click the "Refresh Cache" button to fetch new data. Cache date: ${new Date(timestamp).toLocaleString()}`;
+    `Using cached results. Click one of the "Refresh Cache" buttons to fetch new data. Cache date: ${new Date(timestamp).toLocaleString()}`;
   cacheNotification.style.backgroundColor = "#e6f7ff";
   cacheNotification.style.border = "1px solid #91d5ff";
   cacheNotification.style.borderRadius = "4px";
@@ -1009,6 +1009,33 @@ async function checkAllRoutes() {
   }
 }
 
+function displayRefreshCacheButton(dateHeader, element, label, date, setRefresh) {
+  const refreshCacheButton = document.createElement(element);
+  refreshCacheButton.textContent = label;
+  refreshCacheButton.style.padding = "5px 10px";
+
+  refreshCacheButton.style.fontSize = "12px";
+  refreshCacheButton.style.backgroundColor = "#f0f0f0";
+  refreshCacheButton.style.border = "1px solid #ccc";
+  refreshCacheButton.style.borderRadius = "3px";
+  refreshCacheButton.style.cursor = "pointer";
+  refreshCacheButton.addEventListener("click", () => {
+    const origin = document
+      .getElementById("dep-airport-input")
+      .value.toUpperCase();
+    const destination = document
+      .getElementById("arr-airport-input")
+      .value.toUpperCase();
+    const via = document
+      .getElementById("via-airport-input")
+      .value.toUpperCase();
+    const cacheKey = makeCacheItineraryKey(origin, destination, via, date);
+    removeCachedResults(cacheKey, setRefresh);
+  });
+
+  dateHeader.appendChild(refreshCacheButton);
+}
+
 function displayResultsHeaderDate(resultsDiv, date, flags = {}, direction = "out") {
       let dateHeader = (flags.append || direction == "ret")
         ? resultsDiv.querySelector(`h3[data-date="${date}"]`)
@@ -1030,30 +1057,8 @@ function displayResultsHeaderDate(resultsDiv, date, flags = {}, direction = "out
         dateHeader.appendChild(dateText);
 
         if(direction == "out") {
-          const clearCacheButton = document.createElement("button");
-          clearCacheButton.textContent = "♻️ Refresh Cache";
-          clearCacheButton.style.padding = "5px 10px";
-
-          clearCacheButton.style.fontSize = "12px";
-          clearCacheButton.style.backgroundColor = "#f0f0f0";
-          clearCacheButton.style.border = "1px solid #ccc";
-          clearCacheButton.style.borderRadius = "3px";
-          clearCacheButton.style.cursor = "pointer";
-          clearCacheButton.addEventListener("click", () => {
-            const origin = document
-              .getElementById("dep-airport-input")
-              .value.toUpperCase();
-            const destination = document
-              .getElementById("arr-airport-input")
-              .value.toUpperCase();
-            const via = document
-              .getElementById("via-airport-input")
-              .value.toUpperCase();
-            const cacheKey = makeCacheItineraryKey(origin, destination, via, date);
-            removeCachedResults(cacheKey, true);
-          });
-
-          dateHeader.appendChild(clearCacheButton);
+          displayRefreshCacheButton(dateHeader, "refreshItineraryButton", "♻️ Itinerary", date, false);
+          displayRefreshCacheButton(dateHeader, "refreshItineraryAndRouteButton", "♻️ Itinerary+Route", date, true);
         }
       }
 
@@ -1169,7 +1174,9 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
 
       const resultsDiv = (direction == "out") ? topRouteElement : returnItineraryDiv;
 
-      let dateHeader = displayResultsHeaderDate(resultsDiv, date, flags, direction);
+      if(direction == "out" && itinerariesCnt == 1) {
+        let dateHeader = displayResultsHeaderDate(resultsDiv, date, flags, direction);
+      }
 
       let itineraryList = (flags.append || direction == "ret")
           ? resultsDiv.querySelector(`ul[data-date="${date}"]`)
@@ -1545,7 +1552,7 @@ function clearCachedResult(cacheKey, showButton, clearButton) {
   const cachedResults = getCachedResults(cacheKey);
   const timestamp = getCachedTimestamp(cacheKey);
   if (cachedResults) {
-      removeCachedResults(cacheKey, true);
+      removeCachedResults(cacheKey);
       showButton.remove();
       clearButton.remove();
   } else {
