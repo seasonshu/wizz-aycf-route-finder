@@ -254,14 +254,16 @@ async function checkRoute(origin, destination, date, control) {
 
     // Code 400: Flight not available
     if (fetchResponse.status == 400) {
-      if (responseData.message == 'error.availability') {
+      if (responseData.code == 'error.availability') {
         console.log("Flight not available. Received code '" + responseData.code +  "'; responseData=" + JSON.stringify(responseData));
-        const noFlightsOutbound = [];
-        setCachedResults(cacheKey, noFlightsOutbound);
-        return { flights: noFlightsOutbound, timestamp: null };
+      } else if (responseData.code == 'PASS-0000') {
+        console.log("Flight search exception. Received code '" + responseData.code +  "'; responseData=" + JSON.stringify(responseData));
       } else {
-        throw new Error(`HTTP error! status: ${fetchResponse.status}, error: ${fetchResponse.error()}`);
+        console.log("Unknown error. Received code '" + responseData.code +  "'; responseData=" + JSON.stringify(responseData));
       }
+      const noFlightsOutbound = [];
+      setCachedResults(cacheKey, noFlightsOutbound);
+      return { flights: noFlightsOutbound, timestamp: null };
     }
 
     const flightsOutbound = responseData.flightsOutbound || [];
