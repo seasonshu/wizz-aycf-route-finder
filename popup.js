@@ -441,6 +441,14 @@ function formatDateShort(date) {
   });
 }
 
+function formatDateShortWeekday(date) {
+  return new Date(date).toLocaleDateString(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function convertDateTimeToLocalISODate(dateTime, offsetText) {
   tzOffset = extractTimeZone(offsetText);
   const dateTimeIso = new Date(dateTimeToISOString(dateTime));
@@ -509,8 +517,10 @@ async function checkHop(params, control) {
     }
 
     const updateProgress = () => {
-      const dateFormatted = formatDateShort(params.date);
-      control.progressElement.textContent = `Checking ${params.origin} to ${params.destination} on ${dateFormatted}... ${control.completedRoutes}/${control.destinationCnt}`;
+      const dateFormatted = formatDateShortWeekday(params.date);
+      control.progressElement.innerHTML  = `Itinerary ${control.currentItinerary}\r\n`;
+      control.progressElement.innerHTML += `Checking ${params.origin} to ${params.destination} on ${dateFormatted}...\r\n`;
+      control.progressElement.innerHTML += `Progress ${control.completedRoutes}/${control.destinationCnt} (${control.checkedRoutes} queries)\r\n`;
     };
 
     const { flights, timestamp } = await checkRoute(params.origin, params.destination, params.date, control);
@@ -735,6 +745,10 @@ async function pushHopRequests(queue, hopRequests, control) {
 }
 
 async function checkItinerary(itineraryPlan, date, hops, control) {
+  if(! runningSearchAllowed) {
+    return;
+  }
+
   if(debugItinerarySearch) {
     console.log("checkItinerary called with itineraryPlan=", itineraryPlan);
   }
@@ -745,6 +759,23 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
 
   let hopSequence = 0;
   for (const hopPlan of itineraryPlan) {
+    let hopCnt = 0;
+    control.currentItinerary = '';
+    for (const hopPlan of itineraryPlan) {
+      if(hopCnt == 0) {
+        control.currentItinerary +=
+          (hopCnt == hopSequence ? '<b>': '')
+        + hopPlan.origin;
+      }
+      control.currentItinerary += '->';
+      control.currentItinerary +=
+         (hopCnt == hopSequence - 1 ? '<b>': '')
+        + hopPlan.destination
+        + (hopCnt == hopSequence ? '</b>': '')
+      ;
+      hopCnt++;
+    }
+
     queue = [];
 
     // Add start of itinerary
@@ -769,7 +800,6 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
       const nextFlightLegInputs = await checkHop(job, control);
       if (nextFlightLegInputs) {
         // Process all flights of the day
-        const hopRequests = [];
         let hasNextDayCheck=false;
         for(nextFlightLegInput of nextFlightLegInputs) {
           if(nextFlightLegInput.origin == job.origin) {
@@ -782,7 +812,6 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
         if(hasNextDayCheck) {
           control.destinationCnt++;
         }
-        queue.push(...hopRequests);
       }
     }
   }
@@ -989,6 +1018,7 @@ async function checkAllRoutes() {
       searchStarted : Date.now(),
       progressElement : document.createElement("div"),
       flightsByDate : {},
+      currentItinerary: null,
       checkedRoutes: 0,
       completedRoutes: 0,
       isRateLimited : false,
@@ -1011,6 +1041,7 @@ async function checkAllRoutes() {
 
     control.progressElement.id = "progress";
     control.progressElement.style.marginBottom = "10px";
+    control.progressElement.style.whiteSpace = "pre";
     const progressContainer = createProgressFrame(control.progressElement);
     routeListElement.insertBefore(progressContainer, routeListElement.firstChild);
 
@@ -1378,6 +1409,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
   progressElement.style.marginTop = "10px";
   progressElement.style.fontSize = "0.9em";
   progressElement.style.color = "#000";
+  progressElement.style.whiteSpace = "pre";
   const progressContainer = createProgressFrame(progressElement);
   outItineraryLI.appendChild(progressContainer);
 
@@ -1385,6 +1417,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     searchStarted : Date.now(),
     progressElement : progressElement,
     flightsByDate : {},
+    currentItinerary: null,
     checkedRoutes: 0,
     completedRoutes: 0,
     isRateLimited : false,
@@ -1406,7 +1439,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
 
   for (const returnDate of returnDates) {
     if(debugItinerarySearch) {
-      const returnDateFormatted = formatDateShort(returnDate);
+      const returnDateFormatted = formatDateShortWeekday(returnDate);
       console.log(`Checking return flights for ${returnDateFormatted}`);
     }
 
