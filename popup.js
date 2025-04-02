@@ -2,9 +2,6 @@ console.log("popup.js loaded");
 
 // one of 'en-US', 'en-GB', etc..
 const locale=Intl.NumberFormat().resolvedOptions().locale;
-const maxHops=3;
-const minLayerOver=2;
-const futureDays=3;
 
 // DEBUG
 const debugItineraryRoutes=false;
@@ -20,6 +17,10 @@ const resultsValidForHours=8;
 
 // CONST
 const wizzair_aycf_page="https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
+
+const default_maxHops=3;
+const default_minLayover=2;
+const futureDays=3;
 
 // INTERNAL
 let runningSearchAllowed;
@@ -466,13 +467,14 @@ function makeFlightName(origin, arrival, via) {
   return `${origin} ` + (arrival ? `- ${arrival} ` : ``) + (via.length > 0 ? ` (via: ` + (typeof(via) == "arrays" ? via.join(", ") : via) + `)` : ``);
 }
 
-function makeHopInput(origin, destination, arrival, date, earliestDepartureDateTimeUTC, flightHopsPrev, maxHops, hopsLeft, daysLeft) {
+function makeHopInput(origin, destination, arrival, date, earliestDepartureDateTimeUTC, latestDepartureDateTimeUTC, flightHopsPrev, maxHops, hopsLeft, daysLeft) {
   return {
     origin: origin,
     destination: destination,
     arrival: arrival,
     date: date,
     earliestDepartureDateTimeUTC: earliestDepartureDateTimeUTC,
+    latestDepartureDateTimeUTC: latestDepartureDateTimeUTC,
     flightHopsPrev: flightHopsPrev,
     maxHops: maxHops,
     hopsLeft: hopsLeft,
@@ -526,13 +528,21 @@ async function checkHop(params, control) {
         const arrivalDateTimeUTC = fixUTCDateTime(flight.arrivalDateTimeIso, flight.arrivalOffsetText);
         let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC);
         // Calculate earliest next departure date and time
-        const layoverDateTimeUTC = new Date(dateTimeToISOString(arrivalDateTimeUTC) /*flight.arrivalDateTimeIso*/);
-        layoverDateTimeUTC.setHours(layoverDateTimeUTC.getHours() + minLayerOver);
-        const nextEarliestDepartureDateTimeUTC = extractDateTimeFromISOString(layoverDateTimeUTC);
+        const minLayoverDateTimeUTC = new Date(dateTimeToISOString(arrivalDateTimeUTC) /*flight.arrivalDateTimeIso*/);
+        minLayoverDateTimeUTC.setHours(minLayoverDateTimeUTC.getHours() + control.minLayover);
+        const nextEarliestDepartureDateTimeUTC = extractDateTimeFromISOString(minLayoverDateTimeUTC);
+        // Calculate latest next departure date and time
+        let maxLayoverDateTimeUTC = null;
+        if(control.maxLayover) {
+          maxLayoverDateTimeUTC = new Date(dateTimeToISOString(arrivalDateTimeUTC) /*flight.arrivalDateTimeIso*/);
+          maxLayoverDateTimeUTC.setHours(maxLayoverDateTimeUTC.getHours() + control.maxLayover);
+        }
+        const nextLatestDepartureDateTimeUTC = maxLayoverDateTimeUTC ? extractDateTimeFromISOString(maxLayoverDateTimeUTC) : null;
 
         if(debugItineraryDates) {
           console.log("Found flight=", flight);
           console.log("earliestDepartureDateTimeUTC=" + params.earliestDepartureDateTimeUTC);
+          console.log("latestDepartureDateTimeUTC=" + params.latestDepartureDateTimeUTC);
 //          console.log("flight.departureDateTimeIso=", flight.departureDateTimeIso);
 //          console.log("flight.departureOffsetText=", flight.departureOffsetText);
           console.log("departureDateTimeUTC=" + departureDateTimeUTC);
@@ -540,11 +550,19 @@ async function checkHop(params, control) {
 //          console.log("flight.arrivalOffsetText=", flight.arrivalOffsetText);
           console.log("arrivalDateTimeUTC=", arrivalDateTimeUTC);
           console.log("nextEarliestDepartureDateTimeUTC=", nextEarliestDepartureDateTimeUTC);
+          console.log("nextLatestDepartureDateTimeUTC=", nextLatestDepartureDateTimeUTC);
         }
 
         if(params.earliestDepartureDateTimeUTC && departureDateTimeUTC < params.earliestDepartureDateTimeUTC) {
           if(debugItinerarySearch) {
             console.log("Cannot make transfer, dropping. Flight departureDateTimeUTC=", departureDateTimeUTC, ", earliestDepartureDateTimeUTC=", params.earliestDepartureDateTimeUTC);
+          }
+          return;
+        }
+
+        if(params.latestDepartureDateTimeUTC && departureDateTimeUTC > params.latestDepartureDateTimeUTC) {
+          if(debugItinerarySearch) {
+            console.log("Flight change would take longer than the maximum layover time, dropping. Flight departureDateTimeUTC=", departureDateTimeUTC, ", latestDepartureDateTimeUTC=", params.latestDepartureDateTimeUTC);
           }
           return;
         }
@@ -585,7 +603,7 @@ async function checkHop(params, control) {
 
         if(params.arrival && flight.arrivalStation != params.arrival) {
           if(params.hopsLeft > 1) {
-            const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeUTC, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
+            const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeUTC, nextLatestDepartureDateTimeUTC, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
             nextFlightLegInputs.push(nextParams);
           }
         } else {
@@ -606,7 +624,12 @@ async function checkHop(params, control) {
             departureDateTimeUTC: flightHops[0].departureDateTimeUTC,
             arrivalDateTimeUTC: flightHops[flightHops.length - 1].arrivalDateTimeUTC,
             earliestDepartureDateTimeUTC: nextEarliestDepartureDateTimeUTC,
+            latestDepartureDateTimeUTC: nextLatestDepartureDateTimeUTC,
             daysLeft: daysLeft,
+            maxHops: control.maxHops,
+            maxHopsANY: control.maxHopsANY,
+            minLayover: control.minLayover,
+            maxLayover: control.maxLayover,
           };
 
           const itinerary = JSON.parse(JSON.stringify(control.itinerary));
@@ -639,7 +662,7 @@ async function checkHop(params, control) {
         if(debugItinerarySearch) {
           console.log("Retrying for the next day: " + extractDateFromISOString(incrementDate(params.date, 1)) + " from origin " + params.origin);
         }
-        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, extractDateFromISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
+        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, extractDateFromISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.latestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
         nextFlightLegInputs.push(nextParams);
       }
     }
@@ -658,7 +681,7 @@ async function findNextAirports(hopRequest, control) {
   const destinations = await fetchDestinations(hopRequest.origin, control);
 
   if(hopRequest.arrival && ! destinations.includes(hopRequest.arrival) && control.itinerary.via.length == 0) {
-    throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY. Note: ANY will restrict the maximum number of hops to 2 to avoid excessive search");
+    throw new Error("No direct flights from " + hopRequest.origin + " to " + hopRequest.arrival + ". Specify list of via airports or set it to ANY");
   }
 
   if(hopRequest.arrival && destinations.includes(hopRequest.arrival)) {
@@ -681,7 +704,7 @@ async function findNextAirports(hopRequest, control) {
 }
 
 function cloneHopInputWithDestination(hopRequest, destination) {
-  return makeHopInput(hopRequest.origin, destination, hopRequest.arrival, hopRequest.date, hopRequest.earliestDepartureDateTimeUTC, hopRequest.flightHopsPrev, hopRequest.maxHops, hopRequest.hopsLeft, hopRequest.daysLeft);
+  return makeHopInput(hopRequest.origin, destination, hopRequest.arrival, hopRequest.date, hopRequest.earliestDepartureDateTimeUTC, hopRequest.latestDepartureDateTimeUTC, hopRequest.flightHopsPrev, hopRequest.maxHops, hopRequest.hopsLeft, hopRequest.daysLeft);
 }
 
 async function pushHopRequest(queue, hopRequest, control) {
@@ -726,7 +749,7 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
 
     // Add start of itinerary
     if(hopSequence++ == 0) {
-      await pushHopRequest(nextQueue, makeHopInput(hopPlan.origin, hopPlan.destination, hopPlan.arrival, date, control.earliestReturnDepartureDateTimeUTC, [], hops, hops, days), control);
+      await pushHopRequest(nextQueue, makeHopInput(hopPlan.origin, hopPlan.destination, hopPlan.arrival, date, control.earliestReturnDepartureDateTimeUTC, /*latestDepartureDateTimeUTC*/null, [], hops, hops, days), control);
     }
 
     for (nextJob of nextQueue) {
@@ -789,7 +812,7 @@ async function discoverHop(params, control, discoveredItineraries) {
     }
 
     if(params.hopsLeft > 1) {
-      const nextParams = makeHopInput(params.destination, /*destination*/ null, params.arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, flightHops, params.maxHops, params.hopsLeft-1, params.daysLeft);
+      const nextParams = makeHopInput(params.destination, /*destination*/ null, params.arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, /*latestDepartureDateTimeUTC*/null, flightHops, params.maxHops, params.hopsLeft-1, params.daysLeft);
       nextFlightLegInputs.push(nextParams);
     }
   } else {
@@ -803,7 +826,7 @@ async function discoverItinerary(origin, arrival, date, hops, control) {
   const queue = [];
   const discoveredItineraries = [];
 
-  await pushHopRequest(queue, makeHopInput(origin, /*destination*/ null, arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, [], hops, hops, null), control);
+  await pushHopRequest(queue, makeHopInput(origin, /*destination*/ null, arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, /*latestDepartureDateTimeUTC*/null, [], hops, hops, null), control);
 
   // async function cannot call itself recursively
   while(queue.length > 0) {
@@ -823,7 +846,7 @@ async function discoverItinerary(origin, arrival, date, hops, control) {
 }
 
 async function checkItineraries(origin, arrival, date, control) {
-  const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? 2 : maxHops) : 1;
+  const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? control.maxHopsANY : control.maxHops) : 1;
 
   // Verify input
   await fetchDestinations(origin, control, true);
@@ -904,11 +927,22 @@ async function checkAllRoutes() {
   const arrivalInput = document.getElementById("arr-airport-input");
   const viaInput = document.getElementById("via-airport-input");
   const dateSelect = document.getElementById("date-select");
+  const maxHopsInput = document.getElementById("max-hops-input");
+  const minLayoverInput = document.getElementById("min-layover-input");
+  const maxLayoverInput = document.getElementById("max-layover-input");
+
   const origin = originInput.value.toUpperCase();
   const arrival = arrivalInput.value.toUpperCase();
   const via = viaInput.value.toUpperCase().split(',').map(e => e.trim()).filter(e => e != "");
   const date = dateSelect.value;
   const futureDaysOffset = dateSelect.selectedIndex;
+  let maxHops = parseInt(maxHopsInput.value);
+  if(maxHops < 1) maxHops = 1;
+  if(maxHops > 4) maxHops = 4;
+  let minLayover = parseInt(minLayoverInput.value);
+  if(minLayover < 1) minLayover = 1;
+  let maxLayover = parseInt(maxLayoverInput.value);
+  if(maxLayover < 1) maxLayover = 1;
 
   if (!origin) {
     alert("Please enter a departure airport code.");
@@ -969,6 +1003,10 @@ async function checkAllRoutes() {
         forceRefresh: forceRefresh,
       },
       futureDaysOffset: futureDaysOffset,
+      maxHops: maxHops,
+      maxHopsANY: maxHops,
+      minLayover: minLayover,
+      maxLayover: maxLayover,
     }
 
     control.progressElement.id = "progress";
@@ -1106,7 +1144,7 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
 
     const noFlightsMsg = document.createElement("p");
     noFlightsMsg.textContent =
-      "No return flights found with the minimum layover time of " + minLayerOver + "h before return in the next " + futureDays + " days";
+      "No return flights found with the minimum layover time of " + control.minLayover + "h before return in the next " + futureDays + " days";
     noFlightsMsg.style.fontStyle = "italic";
     returnItineraryDiv.appendChild(noFlightsMsg);
   }
@@ -1360,6 +1398,10 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
       forceRefresh: outboundItinerary.forceRefresh,
     },
     futureDaysOffset: futureDays - outboundItinerary["out"].daysLeft,
+    maxHops: outboundItinerary["out"].maxHops,
+    maxHopsANY: outboundItinerary["out"].maxHopsANY,
+    minLayover: outboundItinerary["out"].minLayover,
+    maxLayover: outboundItinerary["out"].maxLayover,
   }
 
   for (const returnDate of returnDates) {
@@ -1403,7 +1445,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
 function displayCacheButton() {
   const cacheButton = document.createElement("button");
   cacheButton.id = "show-cache";
-  cacheButton.textContent = "Show Last Results (8h)";
+  cacheButton.textContent = "Last Results (8h)";
   cacheButton.classList.add(
     "button",
     "has-background-primary",
@@ -1578,11 +1620,13 @@ console.log("Called clearPageCache");
   getCachedPageData("headers", 0);
 }
 
-function populateLastUsedInput(fieldId, cacheProperty) {
+function populateLastUsedInput(fieldId, cacheProperty, defaultValue = null) {
   const inputElement = document.getElementById(fieldId);
   const cacheValue = localStorage.getItem(cacheProperty);
   if (cacheValue) {
     inputElement.value = cacheValue;
+  } else {
+    inputElement.value = defaultValue;
   }
 
   inputElement.addEventListener("input", () => {
@@ -1594,6 +1638,7 @@ document.addEventListener("DOMContentLoaded", () => {
   console.log("DOM content loaded");
   checkCacheValidity();
   const checkFlightsButton = document.getElementById("search-flights");
+  const settingsButton = document.getElementById("settings-button");
   const routeListElement = document.querySelector(".route-list");
   const audioCheckbox = document.getElementById("play-audio-checkbox");
 
@@ -1607,6 +1652,9 @@ document.addEventListener("DOMContentLoaded", () => {
   populateLastUsedInput("dep-airport-input", "lastDepAirport");
   populateLastUsedInput("arr-airport-input", "lastArrAirport");
   populateLastUsedInput("via-airport-input", "lastViaAirport");
+  populateLastUsedInput("max-hops-input", "maxHops", default_maxHops);
+  populateLastUsedInput("min-layover-input", "minLayover", default_minLayover);
+  populateLastUsedInput("max-layover-input", "maxLayover");
 
   if (!routeListElement) {
     console.error("Error: .route-list element not found in the DOM");
@@ -1649,6 +1697,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   } else {
     console.error("Check Flights button not found");
+  }
+
+  if (settingsButton) {
+    settingsButton.addEventListener("click", () => {
+      console.log("Settings button clicked");
+
+      const settingsGroupElement = document.querySelector("#settings-group");
+      if (settingsGroupElement.style.display === "block") {
+        settingsGroupElement.style.display = "none";
+      } else {
+        settingsGroupElement.style.display = "block";
+      }
+    });
+  } else {
+    console.error("Settings button not found");
   }
 
   displayCacheButton();

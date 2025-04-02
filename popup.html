@@ -13,6 +13,9 @@
     #rate-limited-message {
       display: none;
     }
+    #settings-group {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -36,14 +39,14 @@
       </div>
       <div class="field">
         <label class="label">Arrival Airport</label>
-        <p class="is-size-7 mt-2">Optional - all direct flights when blank<br>When set not, only showing direct flights from Departure Airport</p>
+        <p class="is-size-7 mt-2">Optional - all direct flights when blank<br>When not set, only showing direct flights from Departure Airport</p>
         <div class="control">
           <input id="arr-airport-input" class="input" type="text" placeholder="Airport code (e.g. BUD)">
         </div>
       </div>
       <div class="field">
         <label class="label">Via Airport(s)</label>
-        <p class="is-size-7 mt-2">Optional - route through any of these airport(s)<br>When set to 'ANY', max hops are 2 instead of 3</p>
+        <p class="is-size-7 mt-2">Optional - route through any of these airport(s)<br>Can be set to 'ANY'. Field is a comma separated list.</p>
         <div class="control">
           <input id="via-airport-input" class="input" type="text" placeholder="Airport code(s) (e.g. WAW,OTP)">
         </div>
@@ -55,15 +58,39 @@
           </select>
         </div>
       </div>
-      <div class="field mt-3">
-        <div class="control">
-          <label class="checkbox">
-            <input type="checkbox" id="play-audio-checkbox">
-            Waiting music 🎶
-          </label>
+      <button id="search-flights" class="button is-link mb-4">Check Routes</button>
+      <button id="settings-button" class="button is-link mb-4">Settings</button>
+      <div class="control" id="settings-group" display="none">
+        <div class="field">
+          <label class="label">Maximum Hops</label>
+          <p class="is-size-7 mt-2">Maximum number of hops to reach destination -- '1' means direct flights only</p>
+          <div class="control">
+            <input id="max-hops-input" class="input" type="text" value="3">
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">Minimum Layover</label>
+          <p class="is-size-7 mt-2">Minimum layover between flights -- minimum 2-3 hours is recommended</p>
+          <div class="control">
+            <input id="min-layover-input" class="input" type="text" value="3">
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">Maximum Layover</label>
+          <p class="is-size-7 mt-2">Maximum layover between flights</p>
+          <div class="control">
+            <input id="max-layover-input" class="input" type="text" value="3">
+          </div>
+        </div>
+        <div class="field mt-3">
+          <div class="control">
+            <label class="checkbox">
+              <input type="checkbox" id="play-audio-checkbox">
+              Waiting music 🎶
+            </label>
+          </div>
         </div>
       </div>
-      <button id="search-flights" class="button is-link mb-4">Check Routes</button>
       <div class="notification is-danger" id="rate-limited-message">
         <p class="has-text-weight-bold">Rate limited</p>
         <p class="mt-2">Search stopped due to rate limiting. Results shown are partial. Please wait a few minutes before searching again.</p>
