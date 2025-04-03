@@ -529,6 +529,8 @@ async function checkHop(params, control) {
       if(debugItinerarySearch) {
         console.log("checkHop processing", flights.length, "flights for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
       }
+      // Adjust destination count if there are more than one flights found
+      control.destinationCnt += flights.length - 1;
       flights.forEach((flight) => {
         // Touch upon sloppy data returned by server
         const departureDateTimeUTC = fixUTCDateTime(flight.departureDateTimeIso, flight.departureOffsetText);
@@ -804,6 +806,7 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
           }
         }
         if(hasNextDayCheck) {
+          // Adjust destination to include next day's search
           control.destinationCnt++;
         }
       }
