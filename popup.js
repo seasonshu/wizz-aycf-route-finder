@@ -219,6 +219,12 @@ async function checkRoute(origin, destination, date, control) {
     }
   }
 
+  if (control.checkedRoutes > 0 && control.checkedRoutes % 25 === 0) {
+    control.progressElement.textContent = `Taking a 15 second break to avoid rate limiting...`;
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+  }
+
+  control.checkedRoutes++;
   try {
     const delay = Math.floor(Math.random() * (1000 - 500 + 1)) + 1000;
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -491,7 +497,7 @@ function makeHopInput(origin, destination, arrival, date, earliestDepartureDateT
 }
 
 async function checkHop(params, control) {
-  if(! runningSearchAllowed) {
+  if(! runningSearchAllowed || control.isRateLimited) {
     return;
   }
 
@@ -507,15 +513,6 @@ async function checkHop(params, control) {
   const nextFlightLegInputs = [];
 
   try {
-    if (control.isRateLimited) {
-      return;
-    }
-
-    if (control.checkedRoutes > 0 && control.checkedRoutes % 25 === 0) {
-      control.progressElement.textContent = `Taking a 15 second break to avoid rate limiting...`;
-      await new Promise((resolve) => setTimeout(resolve, 15000));
-    }
-
     const updateProgress = () => {
       const dateFormatted = formatDateShortWeekday(params.date);
       control.progressElement.innerHTML  = `Itinerary ${control.currentItinerary}\r\n`;
@@ -660,9 +657,6 @@ async function checkHop(params, control) {
     }
 
     control.completedRoutes++;
-    if(! timestamp) {
-      control.checkedRoutes++;
-    }
     updateProgress();
     await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -745,7 +739,7 @@ async function pushHopRequests(queue, hopRequests, control) {
 }
 
 async function checkItinerary(itineraryPlan, date, hops, control) {
-  if(! runningSearchAllowed) {
+  if(! runningSearchAllowed || control.isRateLimited) {
     return;
   }
 
