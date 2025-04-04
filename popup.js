@@ -548,6 +548,9 @@ async function checkHop(params, control) {
         }
         const nextLatestDepartureDateTimeUTC = maxLayoverDateTimeUTC ? extractDateTimeFromISOString(maxLayoverDateTimeUTC) : null;
 
+        if(debugItinerarySearch) {
+          console.log("Considering", params.origin + "->" + params.destination, "flight, departureDateTimeUTC=", departureDateTimeUTC, ", arrivalDateTimeUTC=", arrivalDateTimeUTC);
+        }
         if(debugItineraryDates) {
           console.log("Found flight=", flight);
           console.log("earliestDepartureDateTimeUTC=" + params.earliestDepartureDateTimeUTC);
