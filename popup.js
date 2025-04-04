@@ -22,9 +22,6 @@ const default_maxHops=3;
 const default_minLayover=2;
 const futureDays=3;
 
-// INTERNAL
-let runningSearchAllowed;
-
 function extractDestinations(origin, silent, data, isCached) {
   const routesFromOrigin = data.routes.find(
     (route) => route.departureStation.id === origin
@@ -225,6 +222,9 @@ async function checkRoute(origin, destination, date, control) {
   }
 
   control.checkedRoutes++;
+  if(debugItineraryRoutes) {
+    console.log("checkRoute: Sending query to server for origin=", origin, ", destination=", destination, ", date=", date, "control.checkedRoutes=", control.checkedRoutes);
+  }
   try {
     const delay = Math.floor(Math.random() * (1000 - 500 + 1)) + 1000;
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -497,7 +497,7 @@ function makeHopInput(origin, destination, arrival, date, earliestDepartureDateT
 }
 
 async function checkHop(params, control) {
-  if(! runningSearchAllowed || control.isRateLimited) {
+  if(! control.runningSearchAllowed || control.isRateLimited) {
     return;
   }
 
@@ -741,7 +741,7 @@ async function pushHopRequests(queue, hopRequests, control) {
 }
 
 async function checkItinerary(itineraryPlan, date, hops, control) {
-  if(! runningSearchAllowed || control.isRateLimited) {
+  if(! control.runningSearchAllowed || control.isRateLimited) {
     return;
   }
 
@@ -914,7 +914,7 @@ function displayCachedHeader(cacheKey, cachedResults) {
   );
 }
 
-function createProgressFrame(progressElement) {
+function createProgressFrame(control) {
   const progressContainer = document.createElement("div");
 
   const progressElementContainer = document.createElement("div");
@@ -924,7 +924,7 @@ function createProgressFrame(progressElement) {
   progressElementContainer.style.marginBottom = "4px";
   progressContainer.appendChild(progressElementContainer);
 
-  progressElementContainer.appendChild(progressElement);
+  progressElementContainer.appendChild(control.progressElement);
 
   const cancelButtonContainer = document.createElement("div");
   progressContainer.appendChild(cancelButtonContainer);
@@ -932,10 +932,8 @@ function createProgressFrame(progressElement) {
   const cancelButton = document.createElement("button");
   cancelButton.textContent = "Cancel";
   cancelButton.classList.add("button", "is-small", "is-danger", "is-light");
-  cancelButton.addEventListener("click", cancelSearch);
+  cancelButton.addEventListener("click", () => cancelSearch(control));
   cancelButtonContainer.appendChild(cancelButton);
-
-  runningSearchAllowed = true;
 
   return progressContainer;
 }
@@ -1013,6 +1011,7 @@ async function checkAllRoutes() {
   try {
     const control = {
       searchStarted : Date.now(),
+      runningSearchAllowed: true,
       progressElement : document.createElement("div"),
       flightsByDate : {},
       currentItinerary: null,
@@ -1039,7 +1038,7 @@ async function checkAllRoutes() {
     control.progressElement.id = "progress";
     control.progressElement.style.marginBottom = "10px";
     control.progressElement.style.whiteSpace = "pre";
-    const progressContainer = createProgressFrame(control.progressElement);
+    const progressContainer = createProgressFrame(control);
     routeListElement.insertBefore(progressContainer, routeListElement.firstChild);
 
     await checkItineraries(origin, arrival, date, control);
@@ -1401,18 +1400,10 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     returnDates.push(extractDateFromISOString(date));
   }
 
-  const progressElement = document.createElement("div");
-  progressElement.classList.add("return-flight-progress");
-  progressElement.style.marginTop = "10px";
-  progressElement.style.fontSize = "0.9em";
-  progressElement.style.color = "#000";
-  progressElement.style.whiteSpace = "pre";
-  const progressContainer = createProgressFrame(progressElement);
-  outItineraryLI.appendChild(progressContainer);
-
   const control = {
     searchStarted : Date.now(),
-    progressElement : progressElement,
+    runningSearchAllowed: true,
+    progressElement : document.createElement("div"),
     flightsByDate : {},
     currentItinerary: null,
     checkedRoutes: 0,
@@ -1433,6 +1424,14 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     minLayover: outboundItinerary["out"].minLayover,
     maxLayover: outboundItinerary["out"].maxLayover,
   }
+
+  control.progressElement.classList.add("return-flight-progress");
+  control.progressElement.style.marginTop = "10px";
+  control.progressElement.style.fontSize = "0.9em";
+  control.progressElement.style.color = "#000";
+  control.progressElement.style.whiteSpace = "pre";
+  const progressContainer = createProgressFrame(control);
+  outItineraryLI.appendChild(progressContainer);
 
   for (const returnDate of returnDates) {
     if(debugItinerarySearch) {
@@ -1500,8 +1499,8 @@ function displayClearPageCacheButton() {
   }
 }
 
-function cancelSearch() {
-  runningSearchAllowed = false;
+function cancelSearch(control) {
+  control.runningSearchAllowed = false;
 }
 
 function showCachedResults() {
