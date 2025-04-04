@@ -1171,7 +1171,7 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
 
     const noFlightsMsg = document.createElement("p");
     noFlightsMsg.textContent =
-      "No return flights found with the minimum layover time of " + control.minLayover + "h before return in the next " + futureDays + " days";
+      "No return flights found with the minimum layover in the next " + futureDays + " days";
     noFlightsMsg.style.fontStyle = "italic";
     returnItineraryDiv.appendChild(noFlightsMsg);
   }
