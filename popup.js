@@ -751,7 +751,7 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
   if(debugItinerarySearch) {
     console.log("checkItinerary called with itineraryPlan=", itineraryPlan);
   }
-  const days = futureDays - control.futureDaysOffset;
+  const daysLeft = control.daysLeft;
   let queue = [];
   let nextQueue = [];
 
@@ -779,7 +779,7 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
 
     // Add start of itinerary
     if(hopSequence++ == 0) {
-      await pushHopRequest(nextQueue, makeHopInput(hopPlan.origin, hopPlan.destination, hopPlan.arrival, date, control.earliestReturnDepartureDateTimeUTC, /*latestDepartureDateTimeUTC*/null, [], hops, hops, days), control);
+      await pushHopRequest(nextQueue, makeHopInput(hopPlan.origin, hopPlan.destination, hopPlan.arrival, date, control.earliestReturnDepartureDateTimeUTC, /*latestDepartureDateTimeUTC*/null, [], hops, hops, daysLeft), control);
     }
 
     for (nextJob of nextQueue) {
@@ -953,7 +953,7 @@ async function checkAllRoutes() {
   const originInput = document.getElementById("dep-airport-input");
   const arrivalInput = document.getElementById("arr-airport-input");
   const viaInput = document.getElementById("via-airport-input");
-  const dateSelect = document.getElementById("date-select");
+  const depDateSelect = document.getElementById("dep-date-select");
   const maxHopsInput = document.getElementById("max-hops-input");
   const minLayoverInput = document.getElementById("min-layover-input");
   const maxLayoverInput = document.getElementById("max-layover-input");
@@ -961,8 +961,8 @@ async function checkAllRoutes() {
   const origin = originInput.value.toUpperCase();
   const arrival = arrivalInput.value.toUpperCase();
   const via = viaInput.value.toUpperCase().split(',').map(e => e.trim()).filter(e => e != "");
-  const date = dateSelect.value;
-  const futureDaysOffset = dateSelect.selectedIndex;
+  const depDate = depDateSelect.value;
+  const daysLeft = futureDays - depDateSelect.selectedIndex;
   let maxHops = parseInt(maxHopsInput.value);
   if(maxHops < 1) maxHops = 1;
   if(maxHops > 4) maxHops = 4;
@@ -986,7 +986,7 @@ async function checkAllRoutes() {
   document.querySelector("#rate-limited-message").style.display = "none";
   routeListElement.innerHTML = "";
 
-  const cacheKey = makeCacheItineraryKey(origin, arrival, via, date);
+  const cacheKey = makeCacheItineraryKey(origin, arrival, via, depDate);
   const cachedResults = enableItineraryCache ?
     getCachedResults(cacheKey)
     :
@@ -997,7 +997,7 @@ async function checkAllRoutes() {
   if (cachedResults == "Refresh") {
     forceRefresh = true;
   } else if (cachedResults) {
-    console.log("Using cached itinerary results for origin=", origin, ", arrival=", arrival, ", via=", via, ", date=", date);
+    console.log("Using cached itinerary results for origin=", origin, ", arrival=", arrival, ", via=", via, ", date=", depDate);
 
     displayResults(cachedResults);
     displayCachedHeader(cacheKey, cachedResults);
@@ -1031,7 +1031,7 @@ async function checkAllRoutes() {
         via: via,
         forceRefresh: forceRefresh,
       },
-      futureDaysOffset: futureDaysOffset,
+      daysLeft: daysLeft,
       maxHops: maxHops,
       maxHopsANY: maxHops,
       minLayover: minLayover,
@@ -1044,14 +1044,14 @@ async function checkAllRoutes() {
     const progressContainer = createProgressFrame(control);
     routeListElement.insertBefore(progressContainer, routeListElement.firstChild);
 
-    await checkItineraries(origin, arrival, date, control);
+    await checkItineraries(origin, arrival, depDate, control);
 
     progressContainer.remove();
 
     if (! control.isRateLimited) {
-      if (! control.flightsByDate[date] || control.flightsByDate[date].length == 0) {
+      if (! control.flightsByDate[depDate] || control.flightsByDate[depDate].length == 0) {
         const noFlights =`No ` + makeFlightName(origin, arrival, via) + ` flights available`;
-        displayResultsHeaderDate(routeListElement, date);
+        displayResultsHeaderDate(routeListElement, depDate);
 
         const noResultsMessage = document.createElement("p");
         noResultsMessage.classList.add(
@@ -1060,7 +1060,7 @@ async function checkAllRoutes() {
         );
         noResultsMessage.textContent = noFlights;
         routeListElement.appendChild(noResultsMessage);
-        setCachedResults(cacheKey, { [date] : `NoResult-${noFlights}` } );
+        setCachedResults(cacheKey, { [depDate] : `NoResult-${noFlights}` } );
       } else {
         setCachedResults(cacheKey, control.flightsByDate);
         await displayResults(control.flightsByDate);
@@ -1121,7 +1121,7 @@ function displayResultsHeaderDate(resultsDiv, date, flags = {}, direction = "out
         resultsDiv.appendChild(dateHeader);
 
         const dateText = document.createElement("span");
-        dateText.textContent = formatDateLong(date) + ((direction == "ret") ? ": " + direction.toUpperCase() : "");
+        dateText.textContent = ((direction == "ret") ? direction.toUpperCase() + ": " : "") + formatDateLong(date);
         dateHeader.appendChild(dateText);
 
         if(direction == "out") {
@@ -1242,9 +1242,7 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
 
       const resultsDiv = (direction == "out") ? topRouteElement : returnItineraryDiv;
 
-      if(direction == "out" && itinerariesCnt == 1) {
-        let dateHeader = displayResultsHeaderDate(resultsDiv, date, flags, direction);
-      }
+      let dateHeader = displayResultsHeaderDate(resultsDiv, date, flags, direction);
 
       let itineraryList = (flags.append || direction == "ret")
           ? resultsDiv.querySelector(`ul[data-date="${date}"]`)
@@ -1392,13 +1390,27 @@ function displayResults(flightsByDate, direction = "out", flags = {append: false
 }
 
 async function findReturnFlight(outboundItinerary, outItineraryLI) {
+ console.log("findReturnFlight started");
+
   const origin = outboundItinerary["out"].destination;
   const arrival = outboundItinerary["out"].origin;
   const outboundDepartureDate = outboundItinerary["out"].flights[0].date;
   const outboundArrivalDate = outboundItinerary["out"].flights[outboundItinerary["out"].flights.length - 1].date;
   const returnDates = [];
-  for (let i = 0; i <= outboundItinerary["out"].daysLeft; i++) {
-    const date = new Date(outboundArrivalDate);
+
+  new Date(outboundArrivalDate)
+  const dateSelect = document.getElementById("ret-date-select");
+
+  let selectedReturnDate = dateSelect.value;
+  let returnDaysLeft = dateSelect.length - 1 - dateSelect.selectedIndex;
+
+  if(new Date(selectedReturnDate) < new Date(outboundArrivalDate)) {
+    selectedReturnDate = outboundArrivalDate;
+    returnDaysLeft = outboundItinerary["out"].daysLeft;
+  }
+
+  for (let i = 0; i <= returnDaysLeft; i++) {
+    const date = new Date(selectedReturnDate);
     date.setDate(date.getDate() + i);
     returnDates.push(extractDateFromISOString(date));
   }
@@ -1421,7 +1433,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
       via: outboundItinerary.via,
       forceRefresh: outboundItinerary.forceRefresh,
     },
-    futureDaysOffset: futureDays - outboundItinerary["out"].daysLeft,
+    daysLeft: returnDaysLeft,
     maxHops: outboundItinerary["out"].maxHops,
     maxHopsANY: outboundItinerary["out"].maxHopsANY,
     minLayover: outboundItinerary["out"].minLayover,
@@ -1438,7 +1450,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
 
   for (const returnDate of returnDates) {
     if(debugItinerarySearch) {
-      const returnDateFormatted = formatDateShortWeekday(returnDate);
+      const returnDateFormatted = extractDateFromISOString(new Date(returnDate));
       console.log(`Checking return flights for ${returnDateFormatted}`);
     }
 
@@ -1451,6 +1463,9 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
       const routeListElement = document.querySelector(".route-list");
       routeListElement.innerHTML = `<p>Error: ${error.message}</p>`;
     }
+
+    // Adjust remaining days we can search
+    control.daysLeft--;
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -1666,6 +1681,22 @@ function populateLastUsedInput(fieldId, cacheProperty, defaultValue = null) {
   });
 }
 
+function populateDates(elementId, startDate, days) {
+  const dateSelect = document.getElementById(elementId);
+  Array.from(dateSelect.children).forEach(opt => opt.remove());
+
+  for (let i = 0; i <= days; i++) {
+    const date = new Date(startDate);
+    date.setDate(date.getDate() + i);
+
+    const option = document.createElement("option");
+    option.value = date.toISOString().split("T")[0];
+    option.textContent = formatDateShort(date);
+
+    dateSelect.appendChild(option);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log("DOM content loaded");
   checkCacheValidity();
@@ -1750,18 +1781,11 @@ document.addEventListener("DOMContentLoaded", () => {
   displayClearPageCacheButton();
 });
 
-document.addEventListener("DOMContentLoaded", function () {
-  const dateSelect = document.getElementById("date-select");
-  const today = new Date();
+document.addEventListener("DOMContentLoaded", () => populateDates("dep-date-select", new Date(), futureDays));
+document.addEventListener("DOMContentLoaded", () => populateDates("ret-date-select", new Date(), futureDays));
 
-  for (let i = 0; i < 4; i++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + i);
-
-    const option = document.createElement("option");
-    option.value = date.toISOString().split("T")[0];
-    option.textContent = formatDateShort(date);
-
-    dateSelect.appendChild(option);
-  }
+const depDateSelect = document.getElementById("dep-date-select");
+depDateSelect.addEventListener("change", () => {
+    const selectedOffset = depDateSelect.selectedIndex;
+    populateDates("ret-date-select", depDateSelect.value, futureDays-selectedOffset)
 });
