@@ -1679,6 +1679,8 @@ function populateLastUsedInput(fieldId, cacheProperty, defaultValue = null) {
   inputElement.addEventListener("input", () => {
     localStorage.setItem(cacheProperty, inputElement.value.toUpperCase());
   });
+
+  inputElement.dispatchEvent(new Event('change'));
 }
 
 function populateDates(elementId, startDate, days) {
@@ -1712,9 +1714,29 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  populateDates("dep-date-select", new Date(), futureDays);
+  populateDates("ret-date-select", new Date(), futureDays);
+
+  const depDateSelect = document.getElementById("dep-date-select");
+  depDateSelect.addEventListener("change", () => {
+    const retDateSelect = document.getElementById("ret-date-select");
+    const currentRetDate = retDateSelect.value;
+
+    const selectedOffset = depDateSelect.selectedIndex;
+    populateDates("ret-date-select", depDateSelect.value, futureDays-selectedOffset);
+
+    const newRetDateValue = depDateSelect.value > currentRetDate ? depDateSelect.value : currentRetDate;
+    retDateSelect.value = newRetDateValue;
+    if(retDateSelect.selectedIndex == -1) {
+      retDateSelect.selectedIndex = 0;
+    }
+  });
+
   populateLastUsedInput("dep-airport-input", "lastDepAirport");
   populateLastUsedInput("arr-airport-input", "lastArrAirport");
   populateLastUsedInput("via-airport-input", "lastViaAirport");
+  populateLastUsedInput("dep-date-select", "depDate", extractDateFromISOString(new Date()));
+  populateLastUsedInput("ret-date-select", "retDate", extractDateFromISOString(new Date()));
   populateLastUsedInput("max-hops-input", "maxHops", default_maxHops);
   populateLastUsedInput("min-layover-input", "minLayover", default_minLayover);
   populateLastUsedInput("max-layover-input", "maxLayover");
@@ -1779,13 +1801,4 @@ document.addEventListener("DOMContentLoaded", () => {
 
   displayCacheButton();
   displayClearPageCacheButton();
-});
-
-document.addEventListener("DOMContentLoaded", () => populateDates("dep-date-select", new Date(), futureDays));
-document.addEventListener("DOMContentLoaded", () => populateDates("ret-date-select", new Date(), futureDays));
-
-const depDateSelect = document.getElementById("dep-date-select");
-depDateSelect.addEventListener("change", () => {
-    const selectedOffset = depDateSelect.selectedIndex;
-    populateDates("ret-date-select", depDateSelect.value, futureDays-selectedOffset)
 });
