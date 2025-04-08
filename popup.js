@@ -877,6 +877,10 @@ async function discoverItinerary(origin, arrival, date, hops, control) {
 async function checkItineraries(origin, arrival, date, control) {
   const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? control.maxHopsANY : control.maxHops) : 1;
 
+  if(debugItinerarySearch) {
+    console.log("checkItineraries called for origin=", origin, ", arrival=", arrival, ", date=", date, ", via=", control.itinerary.via, ", hops=", hops);
+  }
+
   // Verify input
   await fetchDestinations(origin, control, true);
   for (const hop of control.itinerary.via) {
