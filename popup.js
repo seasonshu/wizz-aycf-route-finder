@@ -614,7 +614,7 @@ async function checkHop(params, control) {
         const flightHops = [...params.flightHopsPrev, flightHop];
 
         if(params.arrival && flight.arrivalStation != params.arrival) {
-          if(params.hopsLeft > 1) {
+          if(daysLeft >= 0 && params.hopsLeft > 1) {
             const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeUTC, nextLatestDepartureDateTimeUTC, flightHops, params.maxHops, params.hopsLeft-1, daysLeft);
             nextFlightLegInputs.push(nextParams);
           }
