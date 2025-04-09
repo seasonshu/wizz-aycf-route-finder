@@ -19,7 +19,7 @@ const resultsValidForHours=8;
 const wizzair_aycf_page="https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 
 const default_maxHops=3;
-const default_minLayover=2;
+const default_minLayover=120;
 const futureDays=3;
 
 function extractDestinations(origin, silent, data, isCached) {
@@ -538,13 +538,13 @@ async function checkHop(params, control) {
         let duration = calculateDuration(departureDateTimeUTC, arrivalDateTimeUTC);
         // Calculate earliest next departure date and time
         const minLayoverDateTimeUTC = new Date(dateTimeToISOString(arrivalDateTimeUTC) /*flight.arrivalDateTimeIso*/);
-        minLayoverDateTimeUTC.setHours(minLayoverDateTimeUTC.getHours() + control.minLayover);
+        minLayoverDateTimeUTC.setMinutes(minLayoverDateTimeUTC.getMinutes() + control.minLayover);
         const nextEarliestDepartureDateTimeUTC = extractDateTimeFromISOString(minLayoverDateTimeUTC);
         // Calculate latest next departure date and time
         let maxLayoverDateTimeUTC = null;
         if(control.maxLayover) {
           maxLayoverDateTimeUTC = new Date(dateTimeToISOString(arrivalDateTimeUTC) /*flight.arrivalDateTimeIso*/);
-          maxLayoverDateTimeUTC.setHours(maxLayoverDateTimeUTC.getHours() + control.maxLayover);
+          maxLayoverDateTimeUTC.setMinutes(maxLayoverDateTimeUTC.getMinutes() + control.maxLayover);
         }
         const nextLatestDepartureDateTimeUTC = maxLayoverDateTimeUTC ? extractDateTimeFromISOString(maxLayoverDateTimeUTC) : null;
 
@@ -971,9 +971,9 @@ async function checkAllRoutes() {
   if(maxHops < 1) maxHops = 1;
   if(maxHops > 4) maxHops = 4;
   let minLayover = parseInt(minLayoverInput.value);
-  if(minLayover < 1) minLayover = 1;
+  if(minLayover < 30) minLayover = 30;
   let maxLayover = parseInt(maxLayoverInput.value);
-  if(maxLayover < 1) maxLayover = 1;
+  if(maxLayover < 30) maxLayover = 30;
 
   if (!origin) {
     alert("Please enter a departure airport code.");
@@ -1681,7 +1681,7 @@ function populateLastUsedInput(fieldId, cacheProperty, defaultValue = null) {
   }
 
   inputElement.addEventListener("input", () => {
-    localStorage.setItem(cacheProperty, inputElement.value.toUpperCase());
+    localStorage.setItem(cacheProperty, inputElement.value);
   });
 
   inputElement.dispatchEvent(new Event('change'));
