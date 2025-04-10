@@ -278,6 +278,7 @@ async function checkRoute(origin, destination, date, control) {
 
     return { flights: flightsOutbound, timestamp: null };
   } catch (error) {
+    control.runningSearchAllowed = false;
     console.error("Error in checkRoute:", error);
     if (
       error.message.includes("429") ||
@@ -678,6 +679,7 @@ async function checkHop(params, control) {
 
     return nextFlightLegInputs;
   } catch (error) {
+    control.runningSearchAllowed = false;
     console.error("Error in checkHop:", error);
     const routeListElement = document.querySelector(".route-list");
     routeListElement.innerHTML = `<p>Error: ${error.message}</p>`;
@@ -1463,6 +1465,7 @@ async function findReturnFlight(outboundItinerary, outItineraryLI) {
     try {
       await checkItineraries(origin, arrival, returnDate, control);
     } catch (error) {
+      control.runningSearchAllowed = false;
       console.error("Error in findReturnFlight checking return flight for ${returnDate}:", error);
       const routeListElement = document.querySelector(".route-list");
       routeListElement.innerHTML = `<p>Error: ${error.message}</p>`;
