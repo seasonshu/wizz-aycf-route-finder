@@ -479,7 +479,7 @@ function convertDateTimeToLocalRegionalTime(dateTime, offsetText) {
 }
 
 function makeFlightName(origin, arrival, via) {
-  return `${origin} ` + (arrival ? `- ${arrival} ` : ``) + (via.length > 0 ? ` (via: ` + (typeof(via) == "arrays" ? via.join(", ") : via) + `)` : ``);
+  return (origin ? `${origin}` : `Everywhere`) + ` - ` + (arrival ? `${arrival}` : `Everywhere`) + (!origin && !arrival && via.length > 0 ? ` (via: ` + (typeof(via) == "arrays" ? via.join(", ") : via) + `)` : ``);
 }
 
 function makeHopInput(origin, destination, arrival, date, earliestDepartureDateTimeUTC, latestDepartureDateTimeUTC, flightHopsPrev, maxHops, hopsLeft, daysLeft) {
@@ -819,20 +819,20 @@ async function checkItinerary(itineraryPlan, date, hops, control) {
   }
 }
 
-async function discoverHop(params, control, discoveredItineraries) {
+async function discoverHop(params, control, discoveredItineraries, departure) {
   if(debugItineraryRoutes) {
-    console.log("discoverHop called for origin=", params.origin, ", destination=", params.destination);
+    console.log("discoverHop called for origin=", params.origin, ", destination=", params.destination, ", reverseSearch=", !departure);
   }
 
   const nextFlightLegInputs = [];
 
   const flightHop = {
-    origin: params.origin,
-    destination: params.destination,
+    origin: departure ? params.origin : params.destination,
+    destination: departure ? params.destination : params.origin,
     arrival: params.arrival,
   };
 
-  const flightHops = [...params.flightHopsPrev, flightHop];
+  const flightHops = departure ? [...params.flightHopsPrev, flightHop] : [flightHop, ...params.flightHopsPrev];
 
   if(params.arrival && params.destination != params.arrival) {
     // Verify we haven't been to this airport yet
@@ -857,13 +857,17 @@ async function discoverItinerary(origin, arrival, date, hops, control) {
   const queue = [];
   const discoveredItineraries = [];
 
-  await pushHopRequest(queue, makeHopInput(origin, /*destination*/ null, arrival, /*date*/null, /*earliestDepartureDateTimeUTC*/null, /*latestDepartureDateTimeUTC*/null, [], hops, hops, null), control);
+  // Search from 'arrival' when 'origin' is not set and reverse itinerary
+  await pushHopRequest(queue, makeHopInput(origin ? origin : arrival,
+                                           /*destination*/ null,
+                                           origin ? arrival : origin,
+                                           /*date*/null, /*earliestDepartureDateTimeUTC*/null, /*latestDepartureDateTimeUTC*/null, [], hops, hops, null), control);
 
   // async function cannot call itself recursively
   while(queue.length > 0) {
     const job = queue.shift();
 
-    const nextFlightLegInputs = await discoverHop(job, control, discoveredItineraries);
+    const nextFlightLegInputs = await discoverHop(job, control, discoveredItineraries, /*departure*/origin);
     if (nextFlightLegInputs) {
       await pushHopRequests(queue, nextFlightLegInputs, control);
     }
@@ -877,14 +881,16 @@ async function discoverItinerary(origin, arrival, date, hops, control) {
 }
 
 async function checkItineraries(origin, arrival, date, control) {
-  const hops = (arrival || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? control.maxHopsANY : control.maxHops) : 1;
+  const hops = ((origin && arrival) || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? control.maxHopsANY : control.maxHops) : 1;
 
   if(debugItinerarySearch) {
     console.log("checkItineraries called for origin=", origin, ", arrival=", arrival, ", date=", date, ", via=", control.itinerary.via, ", hops=", hops);
   }
 
   // Verify input
-  await fetchDestinations(origin, control, true);
+  if(origin) {
+    await fetchDestinations(origin, control, true);
+  }
   for (const hop of control.itinerary.via) {
     if(hop != "ANY") {
       await fetchDestinations(hop, control, true);
@@ -977,8 +983,8 @@ async function checkAllRoutes() {
   let maxLayover = parseInt(maxLayoverInput.value);
   if(maxLayover < 30) maxLayover = 30;
 
-  if (!origin) {
-    alert("Please enter a departure airport code.");
+  if (!origin && !arrival) {
+    alert("Please enter a departure or arrival airport code.");
     return;
   }
 

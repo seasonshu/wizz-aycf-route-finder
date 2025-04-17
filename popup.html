@@ -33,20 +33,21 @@
       </div>
       <div class="field">
         <label class="label">Departure Airport</label>
+        <p class="is-size-7 mt-2">Optional - blank means 'Everywhere'<br>When not set, only showing direct flights to Arrival Airport</p>
         <div class="control">
           <input id="dep-airport-input" class="input" type="text" placeholder="Enter airport code (e.g. LTN)">
         </div>
       </div>
       <div class="field">
         <label class="label">Arrival Airport</label>
-        <p class="is-size-7 mt-2">Optional - all direct flights when blank<br>When not set, only showing direct flights from Departure Airport</p>
+        <p class="is-size-7 mt-2">Optional - blank means 'Everywhere'<br>When not set, only showing direct flights from Departure Airport</p>
         <div class="control">
           <input id="arr-airport-input" class="input" type="text" placeholder="Airport code (e.g. BUD)">
         </div>
       </div>
       <div class="field">
         <label class="label">Via Airport(s)</label>
-        <p class="is-size-7 mt-2">Optional - route through any of these airport(s)<br>Can be set to 'ANY'. Field is a comma separated list.</p>
+        <p class="is-size-7 mt-2">Optional - route through any of these airport(s)<br>Can be set to 'ANY'. Field is a comma separated list.<br>When not set, only showing direct flights. May be updated before searching for 'Return flight'.</p>
         <div class="control">
           <input id="via-airport-input" class="input" type="text" placeholder="Airport code(s) (e.g. WAW,OTP)">
         </div>
