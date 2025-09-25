@@ -911,6 +911,32 @@ async function checkItineraries(origin, arrival, date, control) {
   }
 }
 
+async function iterateItineraries(origins, arrivals, date, control) {
+  const hops = ((origins.length > 0 && arrivals.length > 0) || control.itinerary.via.length > 0) ? (control.itinerary.via.includes("ANY") ? control.maxHopsANY : control.maxHops) : 1;
+
+  if(debugItinerarySearch) {
+    console.log("iterateItineraries called for origins=", origins, ", arrivals=", arrivals, ", date=", date, ", via=", control.itinerary.via, ", hops=", hops);
+  }
+
+  // Support when either origin or arrival is not set
+  if(origins.length == 0) {
+    for (const arrival of arrivals) {
+      await checkItineraries('', arrival, date, control);
+    }
+  }
+  if(arrivals.length == 0) {
+    for (const origin of origins) {
+      await checkItineraries(origin, '', date, control);
+    }
+  }
+
+  for (const origin of origins) {
+    for (const arrival of arrivals) {
+      await checkItineraries(origin, arrival, date, control);
+    }
+  }
+}
+
 function displayCachedHeader(cacheKey, cachedResults) {
   const timestamp = getCachedTimestamp(cacheKey);
 
@@ -970,8 +996,8 @@ async function checkAllRoutes() {
   const minLayoverInput = document.getElementById("min-layover-input");
   const maxLayoverInput = document.getElementById("max-layover-input");
 
-  const origin = originInput.value.toUpperCase();
-  const arrival = arrivalInput.value.toUpperCase();
+  const origin = originInput.value.toUpperCase().split(',').map(e => e.trim()).filter(e => e != "");
+  const arrival = arrivalInput.value.toUpperCase().split(',').map(e => e.trim()).filter(e => e != "");
   const via = viaInput.value.toUpperCase().split(',').map(e => e.trim()).filter(e => e != "");
   const depDate = depDateSelect.value;
   const daysLeft = futureDays - depDateSelect.selectedIndex;
@@ -983,8 +1009,8 @@ async function checkAllRoutes() {
   let maxLayover = parseInt(maxLayoverInput.value);
   if(maxLayover < 30) maxLayover = 30;
 
-  if (!origin && !arrival) {
-    alert("Please enter a departure or arrival airport code.");
+  if (origin.length == 0 && arrival.length == 0) {
+    alert("Please enter departure or arrival airport code(s).");
     return;
   }
 
@@ -1056,7 +1082,7 @@ async function checkAllRoutes() {
     const progressContainer = createProgressFrame(control);
     routeListElement.insertBefore(progressContainer, routeListElement.firstChild);
 
-    await checkItineraries(origin, arrival, depDate, control);
+    await iterateItineraries(origin, arrival, depDate, control);
 
     progressContainer.remove();
 
