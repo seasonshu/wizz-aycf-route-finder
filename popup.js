@@ -503,7 +503,14 @@ async function checkHop(params, control) {
   }
 
   if(debugItinerarySearch) {
-    console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
+    if(params.flightHopsPrev.length == 0) {
+      console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date);
+    } else {
+      console.log("checkHop called for origin=", params.origin, ", destination=", params.destination, ", date=", params.date,
+                  ", identifiedItinerary=", params.flightHopsPrev[params.flightHopsPrev.length - 1].identifiedItinerary,
+                  ", lastHopArrivalDateTimeUTC=", params.flightHopsPrev[params.flightHopsPrev.length - 1].arrivalDateTimeUTC
+      );
+    }
   }
 
   if (! control.flightsByDate[params.date]) {
@@ -512,6 +519,7 @@ async function checkHop(params, control) {
 
   let itineraryCompleted = false;
   const nextFlightLegInputs = [];
+  const tooLongOverlayFlightLegInputs = [];
 
   try {
     const updateProgress = () => {
@@ -577,6 +585,8 @@ async function checkHop(params, control) {
           if(debugItinerarySearch) {
             console.log("Flight change would take longer than the maximum layover time, dropping. Flight departureDateTimeUTC=", departureDateTimeUTC, ", latestDepartureDateTimeUTC=", params.latestDepartureDateTimeUTC);
           }
+          const nextParams = makeHopInput(flight.arrivalStation, /*destination*/ null, params.arrival, nextDepartureDate, nextEarliestDepartureDateTimeUTC, nextLatestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft-1, params.daysLeft);
+          tooLongOverlayFlightLegInputs.push(nextParams);
           return;
         }
 
@@ -611,6 +621,11 @@ async function checkHop(params, control) {
           duration: duration,
           layoverDuration: layoverDuration,
         };
+        if(params.flightHopsPrev.length == 0) {
+          flightHop.identifiedItinerary=flightHop.origin + '->' + flightHop.destination;
+        } else {
+          flightHop.identifiedItinerary=params.flightHopsPrev[params.flightHopsPrev.length - 1].identifiedItinerary + '->' + flightHop.destination;
+        }
 
         const flightHops = [...params.flightHopsPrev, flightHop];
 
@@ -666,14 +681,17 @@ async function checkHop(params, control) {
     updateProgress();
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    if(! itineraryCompleted && params.flightHopsPrev.length > 0 && nextFlightLegInputs.length == 0) {
-      // Could not find a suitable transfer for this day, try again for tomorrow
+    if(! itineraryCompleted && params.flightHopsPrev.length > 0 && tooLongOverlayFlightLegInputs.length == 0) {
+      // May or may not have found a next hop -- try next day as well, unless we already have found a flight with too long of an overlay
       if(params.daysLeft > 0) {
-        if(debugItinerarySearch) {
-          console.log("Retrying for the next day: " + extractDateFromISOString(incrementDate(params.date, 1)) + " from origin " + params.origin);
+        const nextDay = extractDateFromISOString(incrementDate(params.date, 1));
+        if(extractDateFromISOString(new Date(params.latestDepartureDateTimeUTC)) >= nextDay) {
+          if(debugItinerarySearch) {
+            console.log("Queueing check for next day: " + nextDay + " from origin " + params.origin);
+          }
+          const nextParams = makeHopInput(params.origin, params.destination, params.arrival, nextDay, params.earliestDepartureDateTimeUTC, params.latestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
+          nextFlightLegInputs.push(nextParams);
         }
-        const nextParams = makeHopInput(params.origin, params.destination, params.arrival, extractDateFromISOString(incrementDate(params.date, 1)), params.earliestDepartureDateTimeUTC, params.latestDepartureDateTimeUTC, params.flightHopsPrev, params.maxHops, params.hopsLeft, params.daysLeft - 1);
-        nextFlightLegInputs.push(nextParams);
       }
     }
 
